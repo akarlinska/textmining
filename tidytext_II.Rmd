@@ -1,0 +1,518 @@
+---
+title: "Tidytext cz. II - analiza sentymentu i n-gramy"
+author: "Agnieszka Karlińska"
+output:
+  html_notebook:
+      toc: true
+editor_options:
+  chunk_output_type: inline
+---
+
+Na dzisiejszych zajęciach zajmiemy się analizą sentymentu i analizą n-gramów. Skorzystamy z `tidytext` oraz z kilku dodatkowych pakietów, które umożliwiają przetwarzanie i wizualizację danych zgodnie z zasadami *tidy data*. 
+
+Zacznijmy od załadowania potrzebnych pakietów. 
+
+```{r}
+install.packages("reshape2")
+library(reshape2)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(gutenbergr)
+library(tidyr)
+library(tidytext)
+library(wordcloud)
+```
+
+# Analiza sentymentu
+
+## Wprowadzenie
+
+Analiza sentymentu (ang. *sentiment analysis*), nazywana również analizą wydźwięku lub *opinion mining*, to metoda analizy danych tekstowych (bardzo często są to dane pochodzące z mediów społecznościowych), której celem jest identyfikacja i klasyfikacja wypowiedzi ze względu na ich nacechowane emocjonalne. Może być rozumiana dwojako: jako analiza stanów emocjonalnych autora/ki/ów wypowiedzi albo jako analiza emocjonalnego efektu, jaki dana wypowiedź wywołuje u odbiorców.
+
+W analizie sentymentu wykorzystuje się trzy podejścia:
+
+1. *Machine learning*, w tym nadzorowane uczenie maszynowe (ang. *supervised learning*) i nienadzorowane uczenie maszynowe (ang. *unsupervised learning*). O uczeniu maszynowym porozmawiamy za tydzień.
+2. Metoda słownikowa. 
+3. Podejście hybrydowe (mieszane), łączące metody słownikowe i uczenie maszynowe (uważane za najskuteczniejsze). 
+
+Najpopularniejsza jest metoda słownikowa. W ramach tego podejścia bierze się pod uwagę wydźwięk poszczególnych słów. 
+
+## Słowniki 
+
+Istnieje wiele różnych słowników pozwalających na identyfikację słów wyrażających lub wywołujących emocje. Wybór słownika wydźwięku zależy zwykle od problemu badawczego. Na zajęciach będziemy korzystać z dwóch słowników, które znajdują się W pakiecie `tidytext`: słownika `afinn` [(Finn Årup Nielsen)](http://www2.imm.dtu.dk/pubdb/views/publication_details.php?id=6010) i słownika `bing` [(Bing Liu i in.)](https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html) 
+
+Zobaczmy najpierw, jak wyglądają słowniki wydźwięku. Do wskazania słownika służy funkcja `get_sentiments()`.  
+
+```{r}
+# Słownik "bing"
+get_sentiments("bing")
+
+# Ile słów zostało przyporządkowanych do wyróżnionych kategorii?
+get_sentiments("bing") %>%
+  count(sentiment)
+
+# Słownik "afinn"
+get_sentiments("afinn")
+
+# Ile słów zostało przyporządkowanych do wyróżnionych kategorii?
+get_sentiments("afinn") %>%
+  count(value)
+```
+
+W słowniku `bing` słowa zostały zaklasyfikowane jako pozytywne lub negatywne. W słowniku `afinn` słowa zostały opisane na skali od od -5 (maksymalnie negatywne) do 5 (maksymalnie pozytywne). Można również spotkać słowniki, w których poszczególnym słowom przypisane zostały konkretne emocje, np. gniew, smutek, złość, wstręt czy radość. 
+
+Uwaga: poszczególne słowniki nie zawierają wszystkich słów danego języka - w tym przypadku języka angielskiego - ponieważ wiele słów ma wydźwięk neutralny.  
+
+## Inner_join()
+
+Jeśli dane tekstowe zostały zapisane w `tidy text format`, a każdy wiersz ramki danych zawiera jedno słowo (zasada *one-token-per-row*), do analizy sentymentu możemy wykorzystać funkcję `inner_join()` z pakietu `dplyr`, która służy do łączenia ramek danych. Zwraca ona tylko te obserwacje, które wystąpiły zarówno w pierwszej, jak i w drugiej ramce danych. Sprawdźmy jej działanie na prostym przykładzie.
+
+```{r}
+# Tworzymy ramkę danych zawierającą słowa z kampanii reklamowej marki Jaguar.
+tekst <- tibble(word = c("grace", "space", "pace"))
+
+# Wybieramy słownik bing.
+bing <- get_sentiments("bing")
+
+# Łączymy tekst i słownik.
+tekst %>%
+  inner_join(bing)
+
+# Dwie powyższe operacje można wykonać w jednym kroku. Tym razem wybierzmy słownik "afinn".
+tekst %>%
+  inner_join(get_sentiments("afinn"))
+```
+
+Uzyskaliśmy słowo, które znajdowało się i w ramce danych "tekst", i w słowniku "bing"/"afinn" (dwa pozostałe słowa nie zostały zakwalifikowane przez autorów słowników jako pozytywne lub negatywne). Wykonajmy tę samą operację, ale na całym tekście. Tym razem będzie to "Makbet".
+
+Musimy zacząć od kilku kroków wstępnych.
+
+```{r}
+# Pobieramy tekst.
+Makbet <- gutenberg_download(1533)
+
+# Dodajemy numery wierszy, dzielimy sztukę na akty i sceny, a następnie przeprowadzamy tokenizację.  
+Makbet_tidy <- Makbet %>%
+  mutate(linenumber = row_number()) %>%
+  mutate(act = cumsum(str_detect(text, regex("^act [\\divxlc.]",
+                                                 ignore_case = TRUE)))) %>%
+  mutate(scene = cumsum(str_detect(text, regex("^scene [\\divxlc.]",
+                                                 ignore_case = TRUE)))) %>%
+  unnest_tokens(word, text)
+```
+
+Pora na analizę sentymentu. Zastosujmy najpierw słownik `bing` i przyjrzyjmy się słowom nacechowanym pozytywnie/negatywnie. 
+
+```{r}
+Makbet_sent <- Makbet_tidy %>%
+  inner_join(get_sentiments("bing"))
+
+# Utwórzmy listę frekwencyjną.
+Makbet_sent %>%
+  count(word, sentiment, sort = TRUE)
+```
+
+Zobaczmy, jakie wyniki uzyskamy ze słownikiem `afinn`.
+
+```{r}
+Makbet_afinn <- Makbet_tidy %>%
+  count(word, sort = TRUE) %>%
+  inner_join(get_sentiments("afinn"))
+
+# Zobaczmy najczęściej występujące słowa negatywne.
+Makbet_afinn %>%
+  filter(value < 0)
+```
+
+## Zmiana wydźwięku na przestrzeni tekstu
+
+Sprawdźmy, jak zmieniał się wydźwięk emocjonalny tekstu. Możemy to zrobić na kilka sposobów. Najpierw utwórzmy wykres liniowy ilustrujący zmiany zachodzące na przestrzeni kolejnych scen. Kod powinien być dla Państwa w pełni czytelny. 
+
+```{r}
+Makbet_tidy %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(scene, sentiment) %>%
+  ggplot(aes(scene, n, color = sentiment)) +
+  geom_line() +
+  theme_minimal()
+```
+
+Możemy też wykorzystać informację o numerze wiersza. W tym celu do wywołania funkcji `count()` należy dodać argument, przy pomocy którego zdefiniujemy nową jednostkę podziału: określoną liczbę wierszy (70). Do podzielenia tekstu pomocny będzie operator arytmetyczny `%/%`, który służy do tzw. dzielenia całkowitego, czyli dzielenia bez reszty (jest odpowiednikiem `floor(x/y)`). 
+
+```{r}
+Makbet_tidy %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(index = linenumber %/% 70, sentiment) %>%
+  ggplot(aes(index, n, color = sentiment)) +
+  geom_line() +
+  theme_minimal()
+```
+
+Uzyskaliśmy częstości słów pozytywnych/negatywnych występujących we wskazanych przez nas 70-wierszowych segmentach. Obraz jest bardziej zniuansowany. Uwaga: segmenty o długości 70 wierszy są optymalne w przypadku sztuk Szekspira, ale niekoniecznie sprawdzą się do analizy innych tekstów (np. w przypadku powieści należałoby wybrać liczbę nieco większą). Warto przetestować różne opcje. Segmenty nie mogą być ani za małe (wtedy trudno będzie prawidłowo określić wydźwięk), ani za duże (wtedy stracimy z pola widzenia strukturę tekstu).  
+
+Skomplikujmy nieco sprawę. Sprawdźmy, jaki odsetek wszystkich słów w danej scenie stanowią słowa nacechowane pozytywnie/negatywnie. Do wykresu dodajmy linię regresji przy pomocy geometrii `geom_smooth()`. Zastosujmy regresję liniową. Dla przypomnienia: użycie argumentu `se = FALSE` sprawia, że wokół linii nie będzie rysowany obszar ufności dla przewidywania. Argument `lty` pozwala na wskazanie typu linii - 2 to linia przerywana. 
+
+```{r}
+Makbet_prc <- Makbet_tidy %>%
+# Obliczamy, ile jest słów w każdej scenie.
+  group_by(scene) %>%
+  mutate(total_words = n()) %>%
+  ungroup() %>%
+# Wykonujemy analizę sentymentu.
+  inner_join(get_sentiments("bing")) %>%
+  count(scene, sentiment, total_words) %>%
+# Obliczamy odsetek słów nacechowanych pozytywnie/negatywnie.
+  mutate(percent = n / total_words)
+
+ggplot(Makbet_prc, aes(scene, percent, color = sentiment)) +
+  geom_line() +
+  geom_smooth(method = "lm", se = FALSE, lty = 2) +
+  theme_minimal()
+```
+
+Widzimy, że wydźwięk "Makbeta" wraz z kolejnymi scenami robi się coraz bardziej negatywny, co nie powinno być niespodzianką. 
+
+Innym sposobem wizualizacji zmiany wydźwięku emocjonalnego jest obliczenie różnicy pomiędzy liczbą słów nacechowanych pozytywnie i negatywnie. Żeby to osiągnąć, zastosujemy najpierw funkcję `pivot_wider()` z pakietu `tidyr` i umieścimy emocje negatywne i pozytywne w osobnych kolumnach. Później od emocji pozytywnych odejmiemy negatywne. Wyniki zaprezentujemy na wykresie kolumnowym. 
+
+```{r}
+Makbet_diff <- Makbet_tidy %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(index = linenumber %/% 70, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n) %>%
+  mutate(sentiment = positive - negative)
+
+ggplot(Makbet_diff, aes(index, sentiment)) +
+  geom_col(show.legend = FALSE) +
+  theme_minimal()
+```
+
+Jak widać, w zależności od tego, w jaki sposób zdefiniujemy jednostkę podziału i jaką technikę wizualizacji różnicy pomiędzy emocjami pozytywnymi i negatywnymi przyjmiemy, uzyskamy nieco inne rezultaty. 
+
+## Case study: komedie i tragedie
+
+Dalej pracować będziemy na ramce danych zawierającej sześć sztuk Szekspira: trzy komedie i trzy tragedie. Pomysł został zaczerpnięty (i rozwinięty) od [Julii Silge](https://learn.datacamp.com/courses/sentiment-analysis-in-r-the-tidy-way).
+
+Dane zostały zapisane w R-owym formacie `.rda`. Możemy je wczytać przy użyciu funkcji `load()`. 
+
+```{r}
+load("shakespeare.rda")
+str(shakespeare)
+```
+
+Ramka danych `shakespeare` zawiera trzy kolumny: `title`, czyli tytuł sztuki, `type`, czyli gatunek sztuki, oraz `text`, czyli tekst sztuki w podziale na wiersze. 
+
+Zacznijmy od dodania informacji o numerze wiersza i tokenizacji.
+
+```{r}
+SH_words <- shakespeare %>%
+  group_by(title) %>%
+  mutate(linenumber = row_number()) %>%
+  unnest_tokens(word, text) %>%
+  ungroup()
+
+# Jak prezentuje się lista frekwencyjna?
+SH_words %>%
+  count(word, sort = TRUE)
+```
+
+Na szczycie listy znajdują się oczywiście słowa, które nie niosą żadnego znaczenia. Nie musimy się tym przejmować - i tak nie trafią one do ramki danych zawierającej informację o nacechowaniu słów (nie ma ich w słownikach sentymentu). 
+
+Pora na analizę sentymentu. Wykorzystamy słownik "bing". 
+
+```{r}
+SH_sentiment <- SH_words %>%
+  inner_join(get_sentiments("bing")) 
+```
+
+Sprawdźmy najpierw, ile słów pozytywnych/negatywnych znajduje się w poszczególnych tekstach.
+
+```{r}
+SH_sentiment %>%
+  count(title, sentiment)
+```
+
+Która sztuka ma najwyższy odsetek słów nacechowanych pozytywnie?
+
+```{r}
+SH_sentiment %>%
+  count(title, type, sentiment) %>%
+  group_by(title) %>%
+# Obliczamy, ile słów mają poszczególne sztuki.
+  mutate(total = sum(n),
+# Obliczamy odsetki.
+         percent = n / total) %>%
+# Wybieramy tylko emocje pozytywne
+  filter(sentiment == "positive") %>%
+  arrange(desc(percent))
+```
+
+Zgadza się: komedie mają wyższy odsetek słów nacechowanych pozytywnie niż tragedie.  
+
+Sprawdźmy, jakimi słowami o nacechowaniu pozytywnym/negatywnym Szekspir posługiwał się najczęściej. Kod powinien być dla Państwa w pełni zrozumiały.  
+
+```{r}
+top_words <- SH_sentiment %>%
+  count(word, sentiment) %>%
+  group_by(sentiment) %>%
+  top_n(15) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n))
+
+ggplot(top_words, aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ sentiment, scales = "free") +
+  theme_minimal()
+```
+
+Problem: słowo "wilt" w czasach Szekspira nie miało negatywnych konotacji (patrz: "For thou wilt lie upon the wings of night" w sztuce "Romeo i Julia"). Przy tworzeniu słowników sentymentu bazowano na współczesnym języku (dane pochodziły m.in. z mediów społecznościowych i recenzji filmowych). Z tego względu ich zastosowanie do tekstów innych niż współczesne może być nieco kłopotliwe. Warto sprawdzać, jakie słowa w danym tekście zostały zaklasyfikowane jako pozytywne/negatywne i przyjrzeć się szczególnie uważnie tym najpopularniejszym. 
+
+Jak z tego wybrnąć? Możemy zastosować procedurę, której używaliśmy do usuwania stop words. 
+
+```{r}
+SH_clean <- SH_words %>%
+# Słowo "wilt" powinno się znaleźć kolumnie "word" nowej ramki danych. Korzystamy więc z funkcji tibble, a następnie łączymy obie ramki danych przy użyciu funkcji anti_join(). 
+  anti_join(tibble(word = "wilt")) %>%
+  inner_join(get_sentiments("bing")) 
+```
+
+Sprawdźmy efekty. 
+
+```{r}
+top_words_clean <- SH_clean %>%
+  count(word, sentiment) %>%
+  group_by(sentiment) %>%
+  top_n(15) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n))
+
+ggplot(top_words_clean, aes(n, word, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free") +
+  theme_minimal()
+```
+
+Innym sposobem na zilustrowanie najczęstszych słów nacechowanych emocjonalnie jest `chmura słów`. Jeśli chcemy wyróżnic słowa negatywne i pozytywne, możemy wykorzystać funkcję `comparison.cloud()`, która pozwala na porównanie częstości słów (najczęściej w różnych dokumentach). Sprawa jest nieco bardziej skomplikowana niż w przypadku *zwykłej* chmury słów i wymaga przekształcenia ramki danych `SH_clean`. Zastosujemy funkcję `acast` z pakietu `reshape2`. Służy ona do przekształcenia danych z postaci wąskiej do postaci tabeli krzyżowej (macierzy) i przyjmuje następujące argumenty: ramkę danych, formułę w formacie `x_variable ~ y_variable`, która opisuje sposób przekształcenia zmiennych, nazwę kolumny, w której znajdują się wartości (`value.var`), i wartość, jaką R ma uzupełnić braki danych (`fill`). 
+
+```{r}
+SH_clean_matrix <- SH_clean %>%
+  count(word, sentiment) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0)
+
+# Porównajmy ramkę danych i macierz.
+head(SH_clean %>%
+       count(word, sentiment))
+head(SH_clean_matrix)
+
+comparison.cloud(SH_clean_matrix,
+  colors = c("tomato2", "yellowgreen"),
+  max.words = 100)
+```
+
+Nie wszystkie słowa nacechowane pozytywnie/negatywnie występują równie często we wszystkich sztukach i mają taki sam udział w ostatecznym emocjonalnym wydźwięku tekstu. Żeby obliczyć *wkład* każdego słowa wydźwięk tekstu, skorzystamy ze słownika `afinn`. Dla przypomnienia: wydźwięk został w nim opisany na skali od -5 do 5. Pomnóżmy zatem wartość przypisaną danemu słowu (`value`) przez jego częstość (`n`), a następnie podzielmy wynik przez łączną liczbę słów w sztuce. 
+
+```{r}
+sentiment_contributions <- SH_clean %>%
+  count(title, word, sort = TRUE) %>%
+  inner_join(get_sentiments("afinn")) %>%
+  group_by(title) %>%
+  mutate(contribution = value * n/sum(n)) %>%
+  ungroup()
+    
+sentiment_contributions
+```
+
+*Kolejny problem: "Hero" to imię jednej z głównych bohaterek w sztuce "Wiele hałasu o nic". Należałoby je być może usunąć z listy słów nacechowanych emocjonalnie.*
+
+Przyjrzyjmy się dokładniej sztukom "Hamlet" i "Sen nocy letniej". Jakie są ich odpowiednio najbardziej negatywne i najbardziej pozytywne słowa?
+
+```{r}
+sentiment_contributions %>%
+  filter(title == "Hamlet, Prince of Denmark") %>%
+  arrange(contribution)
+
+sentiment_contributions %>%
+  filter(title == "A Midsummer Night's Dream") %>%
+  arrange(desc(contribution))
+```
+
+Zobaczmy teraz, jak zmieniał się wydźwięk emocjonalny poszczególnych sztuk. W tym celu musimy raz jeszcze wykonać analizę sentymentu (wykorzystamy słownik "bing"), a następnie obliczyć częstości słów, dodając do wywołania funkcji `count()` trzy argumenty: `title`, czyli tytuł sztuki, `index` - zdefiniowany przez nas argument, który służy do podziału tekstu na bloki, oraz `sentiment`, czyli wydźwięk. 
+
+Utwórzmy wykres liniowy. Poszczególne sztuki pokażmy na osobnych panelach.  
+
+```{r}
+SH_clean %>%
+  count(title, index = linenumber %/% 70, sentiment) %>%
+  ggplot(aes(index, n, color = sentiment)) +
+  geom_line() +
+  facet_wrap(~title, scales = "free") +
+  theme_minimal()
+```
+
+Dodajmy informację o gatunku sztuki (`type`) i utwórzmy wykres kolumnowy ilustrujący różnicę pomiędzy liczbą słów o wydźwięku pozytywnym i negatywnym.
+
+```{r}
+SH_clean %>%
+  count(title, type, index = linenumber %/% 70, sentiment) %>%
+  pivot_wider(names_from = sentiment, values_from = n) %>%
+  mutate(sentiment = positive - negative) %>%
+  ggplot(aes(index, sentiment, fill = type)) +
+  geom_col() +
+  facet_wrap(~title, scales = "free") +
+  theme_minimal()
+```
+
+# N-gramy
+
+## Wprowadzenie
+
+N-gramy to ciągi symboli (m.in. znaków, sylab czy słów) o długości n. W zależności od wartości n przyjęło się określać:
+
+  - 1-gramy jako unigramy,
+  - 2-gramy jako bigramy,
+  - 3-gramy jako trigramy itd.
+
+W NLP n-gramy służą do wyznaczania i przewidywania kolejnego elementu sekwencji. Na bazie n-gramów można zbudować prosty model języka, opierający się na rozkładzie prawdopodobieństwa wystąpienia symbolu po n-gramie symboli. Upraszczając: jeśli wiemy, jak często po słowie X występuje słowo Y, możemy zbudować model relacji między nimi. 
+
+Nas interesować będą powtarzające się w tekstach ciągi słów. Do tej pory w analizie skupialiśmy się na pojedynczych słowach. Teraz przyjrzymy się tokenom składającym się z dwóch lub trzech wyrazów. Czemu to jest ważne? W językoznawstwie korpusowym uważa się, że znaczenia danego słowa zależy od jego związku z innymi współwystępującymi słowami. Użytkownicy języka posługują się gotowymi frazami, a nośnikami znaczeń są związki wielowyrazowe. 
+
+## Tokenizacja
+
+Sięgnijmy po tekst Marxa, który analizowaliśmy na poprzednich zajęciach z R (zestawienie czterech autorów).  
+
+```{r}
+Marx <- gutenberg_download(46423)
+
+# Usuńmy zbędne fragmenty.
+Marx_clean <- Marx[404: length(Marx$text), ]
+```
+
+Zaczynamy od tokenizacji przy użyciu funkcji `unnest_tokens()`. Jak pamiętamy, jej pierwszym argumentem jest ramka danych, a kolejnymi trzema: `output` (kolumna, którą stworzymy w wyniku podziału), `input`(kolumna, której zawartość chcemy podzielić) i `token` (jednostka podziału). We wcześniejszych analizach korzystaliśmy z domyślnej jednostki podziału - słów. Teraz ustawimy argument `token` na `ngrams`. Dodamy również argument `n`, który służy do określenia liczby słów w n-gramie. Jeśli chcemy uzyskać bigramy, trzeba ustawić go na 2, jeśli trigramy - na 3. 
+
+```{r}
+Marx_bigrams <- Marx_clean %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+Marx_bigrams
+```
+
+Zauważmy, że n-gramy na siebie nachodzą: drugie słowo pierwszego bigramu jest zarazem pierwszym słowem drugiego itd. 
+
+Uwaga: jeśli przejrzymy listę dokładniej, zauważymy sporo słów zapisanych z `_`. Usuńmy znaki podkreślenia i utwórzmy listę frekwencyjną bigramów. 
+
+```{r}
+Marx_bigrams <- Marx_bigrams %>%
+  mutate(bigram = str_replace_all(bigram, "_", replacement = ""))
+
+Marx_bigrams %>%
+  count(bigram, sort = TRUE)
+```
+
+Wyniki nie są zbyt interesujące. Wśród najczęściej występujących bigramów dominują pary stop words.
+
+## Stop words
+
+Jak usunąć stop words? Najpierw musimy podzielić bigramy na pojedyncze słowa i umieścić je w odobnych kolumnach. Wykorzystamy w tym celu funkcję `separate()` z pakietu `tidyr`. Jej argumentami są: ramka danych, nazwa kolumny, która ma zostać podzielona (w naszym przypadku jest to `bigram`), nazwy zmiennych utworzonych w wyniku podziału (`word1` i `word2`) oraz separator (`" "`). Następnie możemy usunąć słowa, korzystając z ramki danych `stop_words` dostępnej w `tidytext`. W tym celu użyjemy funkcji `filter()`, operatora `%in%` oraz operatora logicznego `!` (negacja).   
+```{r}
+Marx_bigrams_separated <- Marx_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+Marx_bigrams_filtered <- Marx_bigrams_separated %>%
+# Wybieramy słowa, które nie znajdują się w kolumnie "words" ramki danych "stop_words". 
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+```
+
+Zobaczmy efekty. 
+
+```{r}
+Marx_bigram_counts <- Marx_bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+Marx_bigram_counts
+```
+
+Jeśli chcemy ponownie połączyć słowa, umieszczając je w jednej kolumnie, możemy wykorzystać funkcję `unite()`, która stanowi dokładną odwrotność funkcji `separate()`. Jej argumentami są: ramka danych, nazwa nowej kolumny, nazwy kolumn, które mają zostać połączone, oraz separator. 
+
+```{r}
+Marx_bigrams_united <- Marx_bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ") 
+```
+
+Zobaczmy efekty.
+
+```{r}
+Marx_bigrams_united %>%
+  count(bigram, sort = TRUE) 
+```
+
+W analogiczny sposób postępujemy w przypadku trigramów. 
+
+```{r}
+Marx_clean %>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
+  mutate(trigram = str_replace_all(trigram, "_", replacement = "")) %>%
+  separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word,
+         !word3 %in% stop_words$word) %>%
+  count(word1, word2, word3, sort = TRUE)
+```
+
+## Analiza i wizualizacje
+
+Dzięki temu, że umieściliśmy bigramy w dwóch kolumnach, możemy wskazać słowa współwystępujące z interesującym nas wyrazem. Weźmy na przykład słowo "labor". W jaki sposób Marx określa pracę?
+
+```{r}
+Marx_bigrams_filtered %>%
+  filter(word2 == "labor") %>%
+  count(word1, sort = TRUE)
+```
+
+Najczęstsze bigramy możemy zaprezentować np. na wykresie słupkowym.
+
+```{r}
+Marx_bigrams_united %>%
+  count(bigram, sort = TRUE) %>%
+  mutate(bigram = reorder(bigram, n)) %>%
+  top_n(15, n) %>%
+  ggplot(aes(n, bigram)) +
+  geom_col() +
+  theme_minimal() 
+```
+
+Na koniec sprawdźmy, jak Marx wypada na tle Kanta, Nietzschego i Freuda.
+
+```{r}
+autorzy <- gutenberg_download(c(4363, 46423, 4280, 38219), 
+                              meta_fields = "author")
+
+autorzy_bigrams <- autorzy %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word,
+         !word2 %in% stop_words$word) %>%
+  unite(bigram, word1, word2, sep = " ") %>%
+  count(author, bigram, sort = TRUE) %>%
+  group_by(author) %>% 
+  top_n(10, n) %>% 
+  ungroup() %>%
+  mutate(bigram = reorder(bigram, n)) %>%
+  mutate(author = factor(author, levels = c("Kant, Immanuel",
+                                            "Nietzsche, Friedrich Wilhelm", 
+                                            "Marx, Karl",
+                                          "Freud, Sigmund"))) 
+
+ggplot(autorzy_bigrams) +
+  geom_col(aes(n, bigram, fill = author),
+           show.legend = FALSE) +
+  labs(x = "freq.", y = NULL) +
+  facet_wrap(~author, scales = "free") +
+  theme_minimal() 
+```
+
+
+
+---
+
+![](https://raw.githubusercontent.com/tzoltak/3502-SCC-ADR/master/belka_gorna.png)
