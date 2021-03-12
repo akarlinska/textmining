@@ -1,0 +1,550 @@
+---
+title: "Analiza tekstu z tidytext"
+author: "Agnieszka Karlińska"
+output:
+  html_notebook:
+      toc: true
+editor_options:
+  chunk_output_type: inline
+---
+
+# Wprowadzenie
+
+Na dzisiejszych zajęciach poznamy sposoby pracy z danymi tekstowymi przy użyciu pakietu`tidytext`. Zawiera on funkcje, które umożliwiają konwersję tekstu do i z formatów uporządkowanych (*tidy text format*), zgodnych z [*tidy data principles*](https://r4ds.had.co.nz/tidy-data.html), oraz płynne przechodzenie między narzędziami służącymi do pracy z `ramkami danych` i narzędziami służącymi do eksploracji tekstu. Będziemy korzystać ze znanej nam dobrze składni, w tym operatora *pipe* `%>%`, i funkcji wykorzystywanych do przetwarzania, analizy i wizualizacji danych (pakiety `dplyr` i `ggplot2`). Zastosujemy również wybrane funkcje z pakietów `textstem`, `SnowballC` i `wordcloud`.
+
+Pracować będziemy na `ramkach danych`, a właściwie na `tibbles` (dla uproszenia pozostaniemy przy tym pierwszym, bardziej ogólnym określeniu). Krótkie przypomnienie: `tibble` to „ulepszona” wersja ramki danych, która w niektórych sytuacjach zachowuje się minimalnie inaczej i oferuje pewne dodatkowe możliwości. Z naszej perspektywy różnice między standardową ramką danych a tibble nie są jednak istotne. Bardziej interesuje nas tzw. `tidy text format`. Jest to coś więcej niż po prostu ramka danych zawierająca dane tekstowe. To ramka danych, w której każdy wiersz zawiera jeden `token`, najczęściej słowo (zasada *one-token-per-row*). 
+
+Zastosujemy podejście określane jako `bag of words` (BOW), a więc worek słów. Zakłada ono, że teksty stanowią zestaw pojedynczych słów - można je sobie wyobrazić jako worki (stąd nazwa), w których znajdują się porozrzucane słowa. W analizie nie bierzemy pod uwagę kolejności słów, ich miejsca i roli w tekście. Nie uwzględniamy informacji, do jakiej części mowy należą i jaką funkcję w zdaniu pełnią. Tym, co nas interesuje, jest częstość ich występowania. 
+
+Zaczniemy od pobrania tekstów przy użyciu pakietu `gutenbergr`, a następnie przejdziemy przez kolejne etapy ich przetwarzania, analizy i wizualizacji wyników. 
+
+Zainstalujmy i załadujmy potrzebne pakiety. 
+
+```{r}
+install.packages("tidytext")
+install.packages("textstem")
+install.packages("SnowballC")
+install.packages("gutenbergr")
+install.packages("wordcloud")
+install.packages("RColorBrewer")
+install.packages("quanteda")
+
+library(tidytext)
+library(textstem)
+library(SnowballC)
+library(gutenbergr)
+library(wordcloud)
+library(RColorBrewer)
+library(quanteda)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+```
+
+# Przygotowanie danych do analizy
+
+## Pozyskiwanie tekstów: pakiet `gutenbergr`
+
+Pakiet `gutenbergr` umożliwia szybkie pobieranie tekstów udostępnionych w ramach [projektu Gutenberg](https://www.gutenberg.org/). Zawiera nie tylko zestaw potrzebnych narzędzi, ale też metadane (m.in. nazwisko autora, tytuł, język). Zobaczmy. 
+
+```{r}
+gutenberg_metadata
+```
+
+Dzięki metadanym możemy przeglądać zbiory i odfiltrowywać rezultaty (np. wyszukać wszystkie teksty danego autora czy teksty należące do określonego gatunku). Bardzo często interesują nas tylko utwory dostępne w języku angielskim, możliwe po pobrania w całości. Tego rodzaju filtrowanie zapewnia funkcja `gutenberg_works()`, która dodatkowo eliminuje duplikaty. Zobaczmy, jakie przyjmuje argumenty i jakie są ich ustawienia domyślne. 
+
+```{r}
+?gutenberg_works
+```
+
+Do przeszukiwania zbiorów możemy również wykorzystać znane nam już funkcje `filter()` (z pakietu `dplyr`) oraz `str_detect()`(z pakietu `stringr`). Sprawdźmy, jak to wygląda w praktyce. 
+
+```{r}
+# Wyszukujemy teksty Adama Smitha, korzystając z metadanych.
+gutenberg_metadata %>%
+  filter(author == "Smith, Adam")
+
+# Wyszkujemy powieść "Oliver Twist" w języku francuskim.
+gutenberg_metadata %>%
+  filter(title == "Oliver Twist", 
+         language == "fr")
+
+# Jeśli chcemy zawęzić poszukiwania do pełnotekstowych prac anglojęzycznych, możemy dodać kolejne argumenty do filter(), albo zastosować funkcję gutenberg_works().
+gutenberg_works(author == "Smith, Adam")
+gutenberg_works(title == "Crime and Punishment")
+
+# A co, jeśli nie mamy pełnych danych o tekście (np. nie wiemy, w jaki sposób zapisane zostało nazwisko autora) albo interesują nas bardziej ogólne wyniki?  Możemy skorzystać z funkcji str_detect() oraz z regex. 
+
+# Wyszukujemy wszystkich autorów o nazwisku zaczynającym się od "Smith".
+gutenberg_works(str_detect(author, "^Smith"))
+
+# Wyszukujemy teksty z "sociology" w tytule, uwzględniając wielkość liter.
+gutenberg_works(str_detect(title, "(S|s)ociology"))
+```
+
+Do pobierania tekstów służy funkcja `gutenberg_download()`. Jej pierwszym, obligatoryjnym argumentem jest numer identyfikacyjny tekstu (`gutenberg_id`). Dowiedzieliśmy się już, że "Zbrodnia i kara" ma ID 2554. Wykorzystajmy tę informację. 
+
+```{r}
+ZiK <- gutenberg_download(2554)
+```
+
+Pobraliśmy cały tekst powieści, uzyskując `ramkę danych` (a właściwie `tibble`) złożoną z dwóch kolumn: w pierwszej znajduje się numer identyfikacyjny utworu, a w drugiej jego treść.
+
+Jeśli chcemy pobrać kilka tekstów, warto zdefiniować argument `meta_fields`. Pozwala on na wybór metadanych, które mają się znaleźć w opisie tekstów, np. jeśli chcemy pobrać kilka powieści danego autora, warto zachować informację o ich tytułach. 
+  
+```{r}
+# Pobieramy prace 4 autorów: Kanta, Marxa, Nietzschego i Freuda. Będziemy je później porównywać, więc zachowujemy informację o nazwisku autora. Do wskazania kilku tekstów używamy funkcji c(). 
+autorzy <- gutenberg_download(c(4363, 46423, 4280, 38219), 
+                              meta_fields = "author")
+```
+
+Do tego zbioru tekstów wrócimy pod koniec notebooka. Teraz skupimy się na "Zbrodni i karze". 
+
+## Czyszczenie danych
+
+Sprawdźmy, jak wygląda powieść.  
+
+```{r}
+View(ZiK)
+```
+
+Jest podzielona na wiersze (każdy wiersz stanowi osobny wiersz ramki danych), części i rozdziały. Na początku znajduje się przedmowa tłumacza, która nie jest zbyt interesująca z perspektywy analizy. Nie ma za to innych, zbędnych informacji, które pojawiają się na początku i na końcu tekstów udostępnianych w ramach projektu Gutenberg. Zajął się nimi za nas `gutenbergr`. Porównajmy [tekst "Zbrodni i kary"](https://www.gutenberg.org/files/2554/2554-h/2554-h.htm) znajdujący się na stronie projektu. 
+
+Usuńmy przedmowę tłumacza. Możemy wykorzystać np. indeksy i funkcję `length()`. 
+
+```{r}
+ZiK_clean <- ZiK[103: length(ZiK$text), ]
+```
+
+Warto pamiętać, że dokumenty, które pobieramy z internetu (ale nie tylko), wymagają zwykle wstępnej obróbki. Na potrzeby analizy powinniśmy wydobyć z nich tzw. czysty tekst. Konieczne może być usunięcie numerów stron, zamiana symboli, oczyszczenie z przeniesień słów czy oczyszczenie z adresów URL. Do tego celu możemy wykorzystać funkcje z pakietu `stringr` i regex. Wydaje się jednak, że w naszym przypadku nie jest to konieczne. 
+
+Uwaga: jeśli analizowany przez nas tekst ma postać wektora, a więc ciągu napisów (to częsty przypadek), możemy go łatwo przekształcić na format spełniający warunki `tidy text`. Wystarczy użyć funkcji `tibble()`.  
+
+Stwórzmy wektor zawierający pierwsze trzy linijki "Alicji w Krainie Czarów".
+
+```{r}
+Alice <- c('Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do: once or twice she had peeped', 'into the book her sister was reading, but it had no pictures or conversations in it,', '"and what is the use of a book," thought Alice "without pictures or conversation?"')
+```
+
+A teraz przekształćmy go na `tibble`, tworząc kolumny `line` i `text`. 
+
+```{r}
+Alice_df <- tibble(line = 1:3, text = Alice)
+Alice_df
+```
+
+## Podział na wiersze, rozdziały i części 
+
+Jednym z pierwszych kroków, jakie warto wykonać - choć nie zawsze krokiem koniecznym - jest podział tekstu na części, np. rozdziały. Dzięki temu będziemy mogli np. sprawdzić, jak zmieniał się jego wydźwięk emocjonalny (tym zajmiemy się na kolejnych zajęciach z R) albo jak zmieniała się częstość występowania danego słowa na przestrzeni całego utworu. Wykorzystamy wyrażenia regularne oraz funkcje `mutate()` i `str_detect()`. Potrzebne będą także dwie dodatkowe funkcje: row_number()` oraz `cumsum()`. Pierwsza z nich - upraszczając - zwraca informację o kolejnych numerach wierszy. Druga służy do wyznaczenia tzw. "skumulowanej" sumy. Zobaczmy, jak działa. 
+
+```{r}
+cumsum(1:5)
+# Startujemy od 1, dodajemy 2, do wyniku tej operacji dodajemy 3, co daje nam 6, później 4 (10), a na końcu 5 (15).
+```
+
+Dokonajmy teraz podziału powieści, tworząc nowe kolumny w ramce danych: `linenumber` (numer wiersza), `chapter` (numer rozdziału) i `part` (numer części). 
+
+```{r}
+ZiK_ch <- ZiK_clean %>%
+# Określamy numer wiersza.
+  mutate(linenumber = row_number()) %>%
+# Określamy numery rozdziałów i części.
+  mutate(chapter = cumsum(str_detect(text, regex("^chapter [\\divxlc]",
+                                                 ignore_case = TRUE))),
+         part = cumsum(str_detect(text, regex("^part [\\divxlc]",
+                                              ignore_case = TRUE))))
+```
+
+Wyjaśnienie: 
+
+  - Kolejne rozdziały zaczynają się od słowa "chapter" oraz numeru zapisanego cyframi rzymskimi (analogicznie w przypadku części). Pierwsza część wzorca powinna być dla Państwa w pełni zrozumiała. Druga pozwala na wychwycenie cyfr rzymskich. 
+  - "Opakowanie" wzorca w `regex` umożliwia dodanie argumentu `ignore_case`, który ustawiony na `TRUE` wskazuje R, że ma zignorować różnice w zakresie wielkości liter: jeśli w tekście wystąpią "CHAPTER" i "Chapter" czy "IV" i "iX", wszystkie te wersje zostaną uwzględnione. W przypadku funkcji `str_detect()` "opakowanie" w `regex` jest domyślne (jak może Państwo pamiętają, jeśli interesuje nas ustalony wzorzec, a nie wzorzec zdefiniowany przy użyciu wyrażeń regularnych, argument `pattern` ustawiamy na `fixed`), więc zwykle można je pominąć. Dodajemy je w sytuacji, kiedy chcemy zmodyfikować działanie funkcji. W tym przypadku: ustawić `ignore_case` na `TRUE`.   
+  
+Zobaczmy efekty.
+
+```{r}
+View(ZiK_ch)
+```
+
+## Tokenizacja 
+
+Mamy do dyspozycji ramkę danych, która zawiera "oczyszczony" tekst. Od osiągnięcia `tidy text format` dzieli nas tylko jeden krok: tokenizacja. Tokenizacja to proces, w wyniku którego tekst podzielony zostaje na mniejsze, logiczne części. To mogą być akapity, zdania, wyrażenia (tym zajmiemy się na kolejnych zajęciach), pojedyncze słowa i znaki. Oczywiście zazwyczaj interesują nas słowa. W `tidytext` tokenizację możemy przeprowadzić przy użyciu funkcji `unnest_tokens()`, która bazuje na narzędziach z pakietu `tokenizers`. Jej pierwszym argumentem jest ramka danych, a kolejnymi trzema: `output` (kolumna, którą stworzymy w wyniku podziału), `input`(kolumna, której zawartość chcemy podzielić) i `token` (jednostka podziału). Domyślną jednostką podziału są pojedyncze słowa.  
+
+Przetestujmy działanie `unnest_tokens()` na trzech pierwszych linijkach "Alicji w Krainie Czarów". 
+
+```{r}
+# Przypomnijmy sobie pierwotną strukturę ramki danych.
+Alice_df
+
+# A teraz podzielmy tekst na słowa i sprawdźmy, co się zmieniło.
+Alice_df %>%
+  unnest_tokens(word, text)
+```
+
+Jakie są efekty? Uzyskaliśmy ramkę danych przechowującą każde występujące w tekście słowo w osobnym wierszu. Kolumna `line` pozostała na swoim miejscu. Miejsce kolumny `text` zajęła natomiast kolumna `word`, w której znajdują się pojedyncze słowa (zgodnie z podejściem `bag of words`). Pozbyliśmy się interpunkcji i spacji, a duże litery zostały zamienione na małe. Uwaga: jeśli chcemy zachować wyjściową wielkość liter, wystarczy do `unnest_tokens()` dodać argument `to_lower` i ustawić go na `FALSE` (ustawienie domyślne to `TRUE`). 
+
+A teraz podzielmy "Zbrodnię i karę" na słowa i utwórzmy nową ramkę danych `ZiK_words`, na której będziemy dalej pracować.
+
+```{r}
+ZiK_words <- ZiK_ch %>%
+  unnest_tokens(word, text)
+```
+
+Na tym etapie warto przyjrzeć się nowej ramce danych i sprawdzić, czy wszystko jest w porządku. W naszym przypadku nie do końca. Jeśli na podglądzie posortujemy słowa alfabetycznie, okaże się, że mamy ponad 250 słów zapisanych z `_`. 
+
+```{r}
+View(ZiK_words)
+```
+
+Sprawdźmy, na czym polega problem.
+
+```{r}
+str_view_all(ZiK_ch$text, "_", match = TRUE)
+```
+
+Wygląda na to, że to po prostu błąd zapisu. Usuńmy zatem "_". 
+
+```{r}
+ZiK_words <- ZiK_words %>%
+  mutate(word = str_replace_all(word, "_", replacement = ""))
+```
+
+Dosyć często będziemy mieli do czynienia z tego typu problemami. Jeśli analizujemy duże korpusy, pozostawienie np. zbędnych znaków nie wpłynie znacząco na wyniki analizy. Jeśli jednak bierzemy na warsztat mniejsze korpusy, warto zadbać o to, żeby teksty były maksymalnie "czyste". 
+
+Co jeszcze możemy zrobić, korzystając z funkcji `unest_tokens()`? 
+
+Podzielmy "Zbrodnię i karę" na zdania i policzmy, ile zdań znajduje się w każdej części. W tym celu musimy zdefiniować argument `token`. Jak już widzieliśmy, kiedy dane tekstowe są w formacie `one-word-per-row`, możemy na nich pracować przy użyciu narzędzi z pakietu `dplyr`. 
+
+```{r}
+ZiK_ch %>%
+  unnest_tokens(sentences, text, token = "sentences") %>%
+  count(part)
+```
+
+Wygląda na to, że ostatnia część powieści jest najdłuższa.
+
+# Lista frekwencyjna 
+
+Pierwszym krokiem w analizie danych tekstowych jest zwykle utworzenie **listy frekwencyjnej** (ang. *word list* lub *frequency list*), czyli listy słów wraz z częstością ich występowania. Nie jest to skomplikowane. Potrzebna nam jest jedynie funkcja `count()`.
+
+```{r}
+ZiK_freq <- ZiK_words %>%
+  count(word, sort = TRUE)
+```
+
+Zobaczmy efekt. 
+
+```{r}
+View(ZiK_freq)
+```
+
+Listy frekwencyjne umożliwiają podział wyrazów na pola leksykalno-semantyczne i domeny tematyczne. Stanowią dobry punkt wyjścia do bardziej pogłębionych analiz. Często wykorzystuje się w nich znane nam już **konkordancje**, a więc listy wystąpień wraz z najbliższym kontekstem, czyli słowami pojawiającymi się przed i po danym terminie. Sprawdzamy wtedy, w jakim kontekście występuje dane słowo i z jakimi innymi słowami się łączy. 
+
+Brzmi obiecująco. Zastanówmy się jednak na następującymi kwestiami:
+
+  - czy słowa znajdujące się na szczycie utworzonej przez nas listy mówią nam coś o zawartości tekstu?
+  - czy słowa takie jak "look" i "looked" czy "hand" i "hands" powinniśmy zliczać osobno, skoro różnią się tylko formą gramatyczną?
+  - czy lista frekwencyjna to dobra metoda porównywania tekstów (zwłaszcza tekstów o różnej długości)?
+  
+Odpowiedź na te trzy pytania jest zwykle negatywna (istnieją wyjątki od tej reguły i wszystko zależy od tego, jak zdefiniujemy problem badawczy i jakie podejście przyjmiemy). Jak zatem "ulepszyć" naszą listę?
+
+## Stop words
+
+Zazwyczaj na szczycie listy frekwencyjnej znajdują się słowa, które nie niosą ze sobą żadnego znaczenia - mogłyby się znaleźć właściwie w dowolnym tekście. Są to słowa funkcyjne. Ich obecność w tekście jest konieczna - bez nich zdania byłyby niezrozumiałe - ale z punktu widzenia analizy są zazwyczaj nieistotne (uwaga: nie zawsze tak jest, np. w analizie stylometrycznej to właśnie na tego rodzaju słowa zwraca się szczególną uwagę). Do ich identyfikacji i usuwania wykorzystuje się `stop listy`, a więc gotowe słowniki zawierające niepożądane słowa, tzw. `stop words`. Należą do nich przede wszystkim spójniki, zaimki i przyimki. W R stop words znajdziemy w ramce danych - tu zaskoczenie -`stop_words` dostępnej w `tidytext`. Zawiera ona słowa należące do trzech różnych słowników: "SMART", "onix" i "snowball". Możemy wykorzystać wszystkie trzy jednocześnie albo wybrać tylko jeden. Stop words najprościej jest usunąć za pomocą funkcji `anti_join()` z pakietu `dplyr`, która służy do łączenia ramek danych (o funkcjach z grupy "join" mówiliśmy na zajęciach obowiązkowych z R - notebook nr 5). Zwraca ona różnicę zbiorów będących jej argumentami, czyli w naszym przypadku zbioru słów występujących w tekście oraz zbioru stop words. Elementy wspólne dla obu zbiorów - stop words zidentyfikowane w  tekście - zostaną usunięte. 
+
+```{r}
+stop_words 
+
+# Usuwamy wszystkie stop words z listy.
+ZiK_stop <- ZiK_words %>%
+  anti_join(stop_words) 
+
+# Jeśli chcemy wybrać słowa znajdujące się w jednym z trzech słowników, możemy je odfiltrować.
+stopwords_onix <- stop_words %>% 
+  filter(lexicon == "onix")
+# Dalej postępujemy identycznie, jak w pierwszym przypadku. 
+```
+
+Uwaga: wyświetlił się nam komunikat opisujący, która zmienna została wykorzystana do łączenia zbiorów. Domyślnie do łączenia zostaną wykorzystane wszystkie zmienne, które występują w obu ramkach danych (w naszym przypadku jest to właśnie `word`), ale można to zachowanie zmienić, używając dodatkowego argumentu`by`.
+
+Jak teraz prezentuje się szczyt naszej listy?
+
+```{r}
+ZiK_stop %>%
+  count(word, sort = TRUE) %>% 
+  top_n(50, n)
+```
+
+Zwróćmy uwagę, że wśród najczęstszych słów znajdują się imiona i nazwiska bohaterów powieści. A jeśli chcielibyśmy wyłączyć je (albo jakiekolwiek inne słowa) z analizy? Możemy stworzyć własną stop listę, a następnie połączyć ją ze `stop_words`. Warunek: nasz słownik stop words powinien mieć taką samą formę, jak ramka danych `stop_words` - imiona i nazwiska bohaterów należy umieścić w kolumnie `word` nowej ramki danych. 
+
+```{r}
+# Tworzymy ramkę danych i umieszczamy nazwiska bohaterów w kolumnie "word". 
+ZiKstop <- tibble(word = c("raskolnikov", "razumihin", "sonia", "ivanovna", "petrovitch", "dounia", "katerina", "porfiry", "svidrigailov", "pyotr", "pulcheria", "rodya", "alexandrovna", "avdotya", "romanovna", "luzhin", "rodion"))
+
+# Łączymy ją z ramką danych "stop_words", korzystając z funkcji bind_rows().  
+ZiKstopwords <- stop_words %>% 
+  bind_rows(ZiKstop)
+```
+
+Zobaczmy efekty.
+
+```{r}
+ZiK_stop2 <- ZiK_words %>%
+  anti_join(ZiKstopwords)
+
+ZiK_stop2 %>%
+  count(word, sort = TRUE) %>% 
+  top_n(50, n)
+```
+
+## Relative frequency 
+
+`Relative frequency`, określana również jako `frequency per million`, to liczba wystąpień danego słowa na milion przypadków. Miara ta służy do porównywania częstości pomiędzy różnymi korpusami. Pozostańmy przy literaturze rosyjskiej. Załóżmy, że chcemy porównać, jak często "Zbrodni i karze" i w "Wojnie i pokoju" pojawia się słowo "Rosja". Informacja, że w pierwszym przypadku "Rosja" występuje 30 razy, a w drugim 50 niewiele nam da, bo powieści mają inną objętość. W takich sytuacjach przydaje się właśnie częstość względna. Jak ją obliczyć? Dzielimy liczbę wystąpień danego słowa przez liczbę słów znajdujących się w korpusie/tekście (uwaga: musimy wziąć pod uwagę cały tekst, czyli w naszym przypadku wszystkie słowa powieści) wyrażoną w milionach. 
+
+```{r}
+ZiK_rel_freq <- ZiK_words %>%
+  count(word, sort = TRUE) %>%
+  mutate(total_words = sum(n)/1000000,
+         rel_freq = n/total_words)
+
+# Jak prezentuje się nasza lista?
+ZiK_rel_freq %>%
+  anti_join(ZiKstopwords) %>% 
+  top_n(50, rel_freq)
+```
+
+## Lematyzacja i stemming
+
+Do utworzenia listy frekwencyjnej (i dalszych analiz) możemy wykorzystać nie słowa, ale `lematy` lub `rdzenie` (ang. *stem*). Oba pojęcia zostały wprowadzone na poprzednich zajęciach, więc teraz tylko krótkie przypomnienie. 
+
+O co chodzi? Z punktu widzenia reprezentacji tekstu słowa podobne pod względem leksykalnym niosą tę samą informację i mogą być rozpoznane jako wystąpienie jednego leksemu. 
+
+Sprowadzanie wyrazu do rdzenia - **stemming** - oznacza usuwanie form przedrostkowych, przyrostkowych czy deklinacyjnych. Narzędzia służące do stemmingu, tzw. `stemmery`, pozwalają na ujednolicanie słów zbliżonych znaczeniowo, ale różniących się pod względem gramatycznym. W R mamy do dyspozycji stemmery, które różnią się nieco działaniem i dają różne efekty. My użyjemy funkcji `wordStem()` z pakietu `SnowballC`. Wykorzystuje ona jeden z najczęściej stosowanych algorytmów stemmingu, tzw. algorytm Portera (od nazwiska jego autora).
+
+```{r}
+ZiK_stem <- ZiK_stop2 %>%
+  mutate(word = wordStem(word))
+```
+
+Zobaczmy, jaki jest rezultat.
+
+```{r}
+ZiK_stem %>%
+  count(word, sort = TRUE) %>% 
+  top_n(50, n)
+```
+
+**Lematyzacja** to proces przypisania każdej formie wyrazowej występującej w tekście jej formy podstawowej (lematu). Do lematyzacji wykorzystamy funkcję `lemmatize_words()` z pakietu `textstem`. 
+
+```{r}
+ZiK_lemma <- ZiK_stop2 %>%
+  mutate(lemma = lemmatize_words(word))
+
+ZiK_lemma_freq <- ZiK_lemma %>%
+  count(lemma, sort = TRUE) 
+
+top_n(ZiK_lemma_freq, 50, n)
+```
+
+Uwaga: jeśli mamy do czynienia z napisem, który chcemy w całości poddać lematyzacji, należy zastosować funkcję `lemmatize_strings()`. Zobaczmy.
+
+```{r}
+lemmatize_strings('Alice was beginning to get very tired of sitting by her sister on the bank, and of having nothing to do: once or twice she had peeped into the book her sister was reading, but it had no pictures or conversations in it, "and what is the use of a book," thought Alice "without pictures or conversation?"')
+```
+
+# Wizualizacja
+
+## Wykresy słupkowe
+
+Najprostszą metodą wizualizacji częstości występowania słów w tekście jest **wykres słupkowy**. Zobaczmy.
+
+```{r}
+# Wybieramy 15 najczęstszych słów.
+ZiK_top <- ZiK_lemma_freq %>%
+  top_n(15, n) 
+
+ggplot(ZiK_top) +
+  geom_col(aes(n, lemma))
+
+# Wyjaśnienie: geom_col() jest odpowiednikiem geom_bar(), z tą jednak różnicą, że w przypadku geom_bar() funkcja sama oblicza wartości do wyświetlenia, a w przypadku geom_col() - otrzymuje już obliczone wartości, czyli w tym przypadku nasze "n". 
+```
+
+Wykres nie wygląda zbyt dobrze, bo słowa nie są posortowane wg liczby wystąpień. Użyjemy więc funkcji `reorder()`. Jej argumentami są wektor, który chcemy posortować (w naszym przypadku "lemma"), oraz wektor o tej samej długości, na podstawie którego R ma wykonać sortowanie (u nas będzie to "n"). Przy okazji trochę upiększymy wykres. 
+
+```{r}
+ZiK_top <- ZiK_lemma_freq %>%
+  mutate(lemma = reorder(lemma, n)) %>%
+  top_n(15, n)
+
+ggplot(ZiK_top) +
+  geom_col(aes(n, lemma)) +
+  theme_minimal() +
+  labs(x = "freq.", y = NULL) 
+```
+
+## Chmury słów
+
+Jedną z najczęściej spotykanych metod wizualizacji częstości słów jest **chmura słów**. W R możemy ją wykonać przy użyciu funkcji `wordcloud()` z pakietu o tej samej nazwie.Zobaczmy najpierw, jakie przyjmuje argumenty.
+
+```{r}
+?wordcloud
+```
+
+Obligatoryjnie musimy wskazać listę słów (`word`) i częstości ich występowania (`freq`) - na tej podstawie R narysuje słowa o odpowiedniej wielkości (będzie ona proporcjonalna do częstości występowania danego słowa). Warto skorzystać także z możliwości wybrania liczby słów, które zostaną wyświetlone (`max.words`). Wybierzmy 35 najczęstszych.  
+
+```{r}
+wordcloud(
+  word = ZiK_lemma_freq$lemma, 
+  # Assign the count column to freq
+  freq = ZiK_lemma_freq$n,
+  max.words = 35)
+```
+
+Zwróćmy uwagę, że przy każdym wykonaniu kodu chmura wygląda nieco inaczej. Jeśli pojawia się komunikat "X could not be fit on page. It will not be plotted", wystarczy rozszerzyć okno lub ponownie wykonać kod.  
+
+Wygenerujmy chmurę słów raz jeszcze. Tym razem zrezygnujmy z losowej kolejności wyświetlania słów (`random.order`) i dodajmy kolory (`colors`). To powinno zwiększyć czytelność. Uwzględnijmy słowa, które występują w tekście co najmniej 150 razy (`min.freq`). 
+
+```{r}
+wordcloud(
+  word = ZiK_lemma_freq$lemma, 
+  # Assign the count column to freq
+  freq = ZiK_lemma_freq$n,
+  min.freq = 150,
+  colors = c("steelblue", "salmon"),
+  random.order = F)
+```
+
+Do ustawienia kolorów możemy wykorzystać pakiet `RColorBrewer`, który pozwala na wybór palety kolorystycznej. Służy do tego funkcja `brewer.pal()`. Musimy wskazać liczbę różnych kolorów w palecie (minimum 3) i nazwę wybranej palety.
+
+```{r}
+wordcloud(
+  word = ZiK_lemma_freq$lemma, 
+  freq = ZiK_lemma_freq$n,
+  max.words = 35,
+  colors = brewer.pal(6, "Dark2"),
+  random.order = FALSE)
+```
+
+*Uwaga: jak już wspominałam, chmury słów - choć niewątpliwie atrakcyjne, a przy tym bardzo proste do wykonania - wzbudzają sporo kontrowersji i nie są uważane za dobre narzędzie do wizualizacji danych tekstowych. Porozmawiamy na ten temat za tydzień.*
+
+## Co dalej?
+
+Na postawie powyższych wizualizacji moglibyśmy spróbować wyciągać jakieś wstępne wnioski, a na pewno sformułować dalsze pytania badawcze. Interesująca może być na przykład kwestia czasu w powieści (mamy kilka określeń dotyczących czasu) czy napięcie pomiędzy "sercem" a "rozumumem". 
+Co możemy dalej zrobić, korzystając ze znanych nam już rozwiązań?
+
+Możemy na przykład przeprowadzić analizę konkordancji dla wybranych słów przy użyciu funkcji `kwic()` z pakietu `quanteda()` (patrz: notebook z rozwiązaniami zadań z pracy domowej dot. `stringr`). W tym celu musimy wrócić do ramki danych sprzed tokenizacji. Przyjrzyjmy się słowu "heart". 
+
+```{r}
+kwic(ZiK_ch$text,
+  pattern = "^(H|h)eart$",
+  window = 10,
+  valuetype = "regex")
+```
+
+Możemy też sprawdzić, jak zmieniała się częstość występowania określonych słów na przestrzeni kolejnych rozdziałów.
+
+```{r}
+ZiK_heart <- ZiK_lemma %>%
+  filter(lemma == "heart") %>%
+  count(lemma, chapter)
+
+ggplot(ZiK_heart) +
+  geom_col(aes(chapter, n))
+```
+
+# Tf-idf
+
+Podejście `bag of words` ma jedną istotną wadę: nie uwzględnia faktu, że słowo występujące w interesującym nas tekście/korpusie może równie często występować w innych tekstach/korpusach. Użycie pewnych słów może wynikać np. ze specyfiki języka czy gatunku i trudno uznać je za charakterystyczne dla analizowanego tekstu czy zbioru tekstów. Do tej pory radziliśmy sobie z tym problemem poprzez usunięcie stop words. Nie jest to jednak najbardziej wyrafinowana metoda. Metodą alternatywną jest `tf-idf`. Pozwala ona zmierzyć, jak *ważne* jest słowo w danym dokumencie. Polega na pomnożeniu częstości słowa przez odwrotną częstość dokumentu.`Tf` to waga częstości słów (*term frequency*), a więc liczba wystąpień słowa w dokumencie (to dla nas nic nowego), zaś `idf` - waga odwrotnej częstości dokumentu (*inverse document frequency*), a konkretnie logarytm ilorazu łącznej liczby dokumentów do liczby dokumentów zawierających dane słowo. `Idf` mierzy więc rangę konkretnego słowa pod kątem jego trafności w tekście. `Tf-idf` słowa w dokumencie jest iloczynem obu tych wag. 
+
+Przyjrzenie się odwrotnej częstości występowania danego terminu w tekście zmniejsza wagę powszechnie używanych słów i zwiększa wagę słów, które w danym tekście/zbiorze dokumentów pojawiają się rzadziej. Obliczanie `tf-idf` pozwala zatem znaleźć słowa, które są jednocześnie ważne w danym tekście i niezbyt powszechne. W `tidytext` służy do tego funkcja `bind_tf_idf()`. Przyjmuje ona cztery argumenty: ramkę danych, kolumnę zawierającą słowa/tokeny (w naszym przypadku jest to "word"), kolumnę zawierającą informację umożliwiającą zidentyfikowanie poszczególnych dokumentów ("author") oraz kolumnę zawierającą informację, ile razy dany termin występuje w dokumencie ("n").
+
+Sprawdźmy, jak zastosowanie `tf-idf` wpływa na wyniki analizy. Wykorzystamy do tego celu teksty Kanta, Marxa, Nietzschego i Freuda, które pobraliśmy przy użyciu `gutenbergr` i zapisaliśmy w ramce danych `autorzy`. Najpierw przeprowadzimy analizę, korzystając ze *zwykłych* częstości słów. Później zastosujemy `tf-idf`. Zdecydowana większość operacji powinna być dla Państwa na tym etapie w pełni zrozumiała, więc nie będę ich szczegółowo opisywać.  
+
+Przypomnijmy sobie, jak wygląda ramka danych `autorzy`.  
+
+```{r}
+View(autorzy)
+```
+
+Etap czyszczenia tekstów sobie odpuścimy. To wymagałoby przyjrzenia się każdemu z tekstów osobno. Zaczynamy od tokenizacji i tematyzacji, a następnie zliczamy wystąpienia słów dla każdego autora.  
+
+```{r}
+autorzy_words <- autorzy %>%
+  unnest_tokens(word, text) %>% 
+  mutate(lemma = lemmatize_words(word)) %>%
+  count(author, lemma, sort = TRUE)
+```
+
+Przygotowujemy wykres słupkowy. Poszczególnych autorów prezentujemy na osobnych panelach (`facet_wrap()`).
+
+```{r}
+autorzy_words %>% 
+  group_by(author) %>% 
+  top_n(10, n) %>% 
+  ungroup() %>%
+  mutate(lemma = reorder(lemma, n)) %>%
+  ggplot(aes(n, lemma, fill = author)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "freq.", y = NULL) +
+  facet_wrap(~author, scales = "free") +
+  theme_minimal() 
+```
+
+Powtarzamy te operacje, ale tym razem usuwamy stop words.
+
+```{r}
+autorzy_words2 <- autorzy %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words) %>%
+  mutate(lemma = lemmatize_words(word)) %>%
+  count(author, lemma, sort = TRUE)
+
+autorzy_words2 <- autorzy_words2 %>% 
+  group_by(author) %>% 
+  top_n(10, n) %>% 
+  ungroup() %>%
+  mutate(lemma = reorder(lemma, n)) %>%
+  mutate(author = factor(author, levels = c("Kant, Immanuel",
+                                            "Nietzsche, Friedrich Wilhelm", 
+                                            "Marx, Karl",
+                                          "Freud, Sigmund"))) 
+
+  ggplot(autorzy_words2) +
+  geom_col(aes(n, lemma, fill = author), show.legend = FALSE) +
+  labs(x = "freq.", y = NULL) +
+  facet_wrap(~author, scales = "free") +
+  theme_minimal() 
+```
+
+*Warto zwrócić uwagę na etykiety osi x. U Kanta mamy maks. 1500 wystąpień słów, a u Nietzschego - 120. Być może świadczy to o tym, że Nieztsche używa bardziej zróżnicowanego słownictwa. Ale równie dobrze może wynikać z faktu, że teksty mają różną długość. Kwestia ta wymaga zbadania.* 
+
+A teraz wykonajmy te same działania, ale z użyciem `tf-idf`. Zaczynamy od wyliczenia `tf-idf` przy pomocy funkcji `bind_tf_idf()`.
+
+```{r}
+autorzy_idf <- autorzy_words %>%
+  bind_tf_idf(lemma, author, n) 
+```
+
+Dalej postępujemy podobnie, jak w przypadku *zwykłych* częstości. 
+
+```{r}
+autorzy_top <- autorzy_idf %>%
+  group_by(author) %>% 
+  top_n(10, tf_idf) %>% 
+  ungroup() %>%
+  mutate(lemma = reorder(lemma, tf_idf)) %>%
+  mutate(author = factor(author, levels = c("Kant, Immanuel",
+                                            "Nietzsche, Friedrich Wilhelm", 
+                                            "Marx, Karl",
+                                          "Freud, Sigmund"))) 
+
+ggplot(autorzy_top) +
+  geom_col(aes(tf_idf, lemma, fill = author),
+           show.legend = FALSE) +
+  labs(x = "tf-idf", y = NULL) +
+  facet_wrap(~author, scales = "free") +
+  theme_minimal() 
+```
+
+Zwróćmy uwagę na dwie kwestie. Po pierwsze, nie usuwaliśmy stop words, ale na wykresie ich nie ma. Wydaje się, że jedynymi słowami, które nie niosą znaczenia, są "ye" i "thou" (Nietzsche). Nie znajdują się one jednak w typowych słownikach stop words i można je uznać za specyficzne dla określonego stylu pisania/epoki. Po drugie, rezultat jest inny niż w przypadku zliczania wystąpień (zniknęły np. słowa "life" i "time"). Czytelniczki i czytelnicy prac Kanta, Nietzschego, Marxa i Freuda prawdopodobnie zgodziliby się, że wyróżnione przez nas słowa są charakterystyczne dla tych autorów.  
+
