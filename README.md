@@ -1,5 +1,6 @@
+![](https://raw.githubusercontent.com/tzoltak/3502-SCC-ADR/master/belka_gorna.png)
+
 # Przetwarzanie danych: Eksploracja tekstu (Text mining)
-(semestr letni 2020/21)
 
 ## Prowadzący
 
@@ -16,5 +17,8 @@ Uczestnicy i uczestniczki zajęć poznają narzędzia do przetwarzania danych te
 
 Na zajęciach korzystać będziemy z narzędzi do przetwarzania i analizy danych tekstowych Korpusomat, TermoPL (IPI PAN), Inforex, WSD, Topic, WebSty, Sentemo (CLARIN-PL), AntConc, LancsBox, bibliotek Natural Language Toolkit (NLTK) i spaCy, pracujących w środowisku Pythona, oraz bibliotek OpenNLP, tm i stylo pracujących w języku R.
 
+---
+Materiały na zajęcia *Analiza danych ilościowych z wykorzystaniem R* zostały przygotowane w ramach projektu *Program zintegrowanych działań na rzecz rozwoju Uniwersytetu Warszawskiego*, realizowanego w ramach programu operacyjnego Wiedza Edukacja Rozwój, oś priorytetowa III. *Szkolnictwo wyższe dla gospodarki i rozwoju*, działanie: 3.5 *Kompleksowe programy szkół wyższych*.
 
+![](https://raw.githubusercontent.com/tzoltak/3502-SCC-ADR/master/belka_dolna.png)
 
