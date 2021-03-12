@@ -1,0 +1,874 @@
+---
+title: "Przetwarzanie napisów i wyrażenia regularne w R"
+author: "Agnieszka Karlińska"
+output:
+  html_notebook:
+      toc: true
+editor_options:
+  chunk_output_type: inline
+---
+
+# Podstawowe operacje na napisach
+
+## Wprowadzenie
+
+Napisy (*strings*) to ciągi dowolnych znaków drukowanych. Do ich tworzenia możemy użyć cudzysłowu lub cudzysłowu apostrofowego. Uwaga: należy pamiętać, aby rozpoczynać i kończyć tekst tym samym rodzajem cudzysłowu.
+
+```{r}
+"To jest napis."
+'To też jest napis.'
+```
+
+W R pracujemy na wektorach *całych* napisów, a więc na ciągach ciągów znaków.
+
+```{r}
+c("napis", "inny napis", "kolejny napis")
+length(c("napis", "inny napis", "kolejny napis"))
+```
+
+Kiedy definiujemy napis, niektórych znaków (np. cudzysłowu) nie możemy wprowadzić wprost. Przyjęto więc, że pewne ciągi znaków - zawsze poprzedzone odwrotnym ukośnikiem `\` - mają specjalne znaczenie.  
+
+Należą do nich m.in.:
+
+  - `\n` - nowy wiersz
+  - `\t` - tabulator
+  - `\b` - usunięcie znaku poprzedzającego (*backspace*)
+  - `\\` - odwrócony ukośnik
+  - `\'` - apostrof (dot. napisów w formie '...')	
+  - `\"` - cudzysłów (dot. napisów w formie "...")	
+  
+Oznacza to, że jeśli chcemy wprowadzić odwrócony ukośnik, musimy go poprzedzić tym samym znakiem. 
+
+Żeby zapoznać się z innymi znakami specjalnymi, wystarczy wywołać: 
+
+```{r}
+?Quotes
+```
+
+Nas interesuje przede wszystkim wprowadzanie cytatów.
+
+```{r}
+napis <- "To jest ciąg znaków (napis)."
+napis2 <- "Jeśli chcesz umieścić wewnątrz niego 'cytat', użyj tzw. cudzysłowu apostrofowego."
+napis3 <- 'Alternatywnie wykorzystaj apostrof do zdefiniowania całego napisu, a cytat umieść w "cudzysłowie".'
+napis4 <- "Możesz też wprowadzić \"cytat\", korzystając z odwróconego ukośnika."
+napis5 <- 'Możesz też wprowadzić \'cytat\', korzystając z odwróconego ukośnika.'
+
+napis
+napis2
+napis3
+napis4
+napis5
+```
+
+Warto zwrócić uwagę na `napis3`. Do jego zdefiniowania nie użyliśmy `\"`, ale R i tak wydrukował ukośnik. Czemu tak się stało? R nie dba o to, jak zdefiniowaliśmy napis, interesuje go tylko to, co ten napis reprezentuje - `napis3` to dla R napis z cudzysłowem wewnątrz. 
+
+Wydrukowanie napisu poprzez wpisanie jego nazwy (a więc w istocie zastosowanie funkcji `print()`) nie odkrywa prawdziwego znaczenia znaków specjalnych - R wypisuje napisy tak, jak je wprowadzamy ręcznie. Żeby sprawdzić, czy zdefiniowany przez nas ciąg znaków rzeczywiście wygląda tak, jak sobie założyliśmy, możemy skorzystać z funkcji `writeLines()`. 
+
+```{r}
+# Stwórzmy wektor.
+napisy <- c(napis, napis2, napis3, napis4, napis5)
+
+# Wydrukujmy jego zawartość.
+napisy
+
+# Skorzystajmy z funkcji writeLines(). 
+writeLines(napisy)
+
+# Zdefiniujmy argument "sep" (separator).
+writeLines(napisy, sep = " ")
+```
+
+Inne przykłady użycia `writeLines()`:
+
+```{r}
+writeLines("Jeśli chcemy otrzymać \\, musimy wprowadzić \\\\.")
+writeLines("To jest bardzo\n\ naprawdę bardzo\n\ długi napis.")
+writeLines("123\b45\n")
+```
+
+
+## Praca z napisami w `stringr`
+
+Do przetwarzania danych tekstowych posługiwać się będziemy pakietem `stringr`, który zawiera spójny zestaw funkcji zaprojektowanych w taki sposób, aby praca z napisami była jak najłatwiejsza, a kod jak najbardziej czytelny. `stringr` - podobnie jak `dplyr` czy `ggplot2` - należy do uniwersum `tidyverse`, a więc zbioru pakietów służących do kompleksowego przetwarzania i wizualizacji danych. Jeśli chcemy wykonać bardziej zaawansowane operacje na napisach i nie znajdziemy potrzebnej funkcji w `stringr`, powinniśmy sięgnąć po pakiet `stringi`, opracowany przez Marka Gągolewskiego. `stringr` bazuje na wybranych - najpopularniejszych i zazwyczaj najbardziej potrzebnych - funkcjach z pakietu `stringi`, ale "opakowuje" je i nieco upraszcza ich użycie. W obu pakietach przyjęto jednak konwencję, więc po opanowaniu `stringr` nie powinniśmy mieć większych trudności z użyciem funkcji z pakietu `stringi`. Uwaga: nazwy poszczególnych funkcji są zwykle bardzo "intuicyjne" (w przeciwieństwie do nazw wielu funkcji wbudowanych), przy czym nazwy funkcji z pakietu `stringr` rozpoczynają się od przedrostka `str_`, a nazwy funkcji z pakietu `stringi` - od przedrostka `stri_`. 
+
+```{r}
+if (!("stringr" %in% installed.packages()[, 1])) {
+  install.packages("stringr")
+}
+library(stringr)
+```
+
+### Funkcja `str_c()` 
+
+Jest ona odpowiednikiem znanej nam już funkcji `paste`, która pozwala łączyć napisy ("c" oznacza *concatenate*) z wielu wektorów w jeden wektor (argument `sep` określa separator) lub nawet w jeden napis (argument `collapse` określa sposób rozdzielenia złączonych napisów). Przypomnijmy sobie, jak działa `paste()`. 
+
+```{r}
+# Mamy do wyboru 9 smaków lodów.
+smaki_lodow <- c("waniliowe", "śmietankowe", "czekoladowe", "orzechowe", "bakaliowe", "truskawkowe", "wiśniowe", "pistacjowe", "straciatella")
+
+# Wybierzmy 3 smaki w sposób losowy.
+moje_smaki <- sample(smaki_lodow, size = 3)
+moje_smaki
+
+# Zacznijmy tworzyć zamówienie, korzystając z funkcji paste() i definiując argument "sep".
+moje_smaki_i <- paste(c("", ", ", " i "), moje_smaki, sep = "")
+moje_smaki_i
+
+# Połączmy poszczególne elementy w jeden napis.
+moje_smaki_col <- paste(moje_smaki_i, collapse = "")
+moje_smaki_col
+
+# Dodajmy resztę zdania.
+moje_zamowienie <- paste("Poproszę lody ", moje_smaki_col, ".", sep = "")
+
+# Zamówmy nasze lody, korzystając z funkcji writeLines().
+writeLines(moje_zamowienie)
+```
+
+Czym różni się `str_c()` od `paste()`?
+
+  - argument `sep` jest domyślnie ustawiony na `""` (pusty napis), nie `" "` (spacja), a to przypadek, z którego korzystamy najczęściej;
+  - `paste()` zamienia brakujące wartości na napis "NA", natomiast w przypadku `str_c()` po połączeniu napisów zawierających NA otrzymamy po prostu NA - dzięki temu możemy się szybko dowiedzieć, czy mamy jakieś brakujące wartości.
+
+Sprawdźmy.
+
+```{r}
+moje_smaki <- c("wiśniowe", NA, NA)
+
+# Najpierw użyjmy funkcji paste().
+moje_smaki_i <- paste(c("", ", ", " i "), moje_smaki, sep = "")
+moje_smaki_i
+paste(moje_smaki_i, collapse = "")
+
+# Porównajmy z funkcją str_c().
+moje_smaki_str <- str_c(c("", ", ", " i "), moje_smaki)
+moje_smaki_str
+str_c(moje_smaki_str, collapse = "")
+```
+
+
+### Funkcja `str_length()` 
+
+Funkcja ta zwraca długości poszczególnych napisów w wektorze.
+
+```{r}
+str_length(c("Max", "Weber"))
+```
+
+Do czego możemy ją wykorzystać? Przyjrzyjmy się ramce danych `babynames`, która zawiera imiona dzieci urodzonych w USA w latach 1880-2017.
+
+```{r}
+install.packages("babynames")
+library(babynames)
+library(dplyr)
+
+# "Wyciągnijmy" imiona żeńskie z 1917 i 2017 roku.
+girl_names_1917 <- filter(babynames, year == 1917, sex == "F")$name
+girl_names_2017 <- filter(babynames, year == 2017, sex == "F")$name
+
+head(girl_names_1917)
+head(girl_names_2017)
+
+# Sprawdźmy, jaką mają długość.
+girl_names_1917_length <- str_length(girl_names_1917)
+head(girl_names_1917_length)
+girl_names_2017_length <- str_length(girl_names_2017)
+head(girl_names_2017_length)
+
+# Sprawdźmy, czy imiona żeńskie są obecnie dłuższe niż 100 lat temu.
+mean(girl_names_2017_length) - mean(girl_names_1917_length)
+
+# Uwaga: funkcja str_length() "pracuje" też na czynnikach. 
+head(str_length(factor(girl_names_2017)))
+```
+
+Okazało się, że imiona żeńskie są dłuższe niż kiedyś. Należy jednak pamiętać, że to dość naiwny sposób na wyliczanie średniej długości imion: nie uwzględniamy liczby dzieci, które otrzymały danę imię.
+
+
+### Funkcja `str_sub()`
+
+Funkcja ta zwraca *podnapis* składający się ze znaków leżących na określonych pozycjach ("od-do") danego napisu.
+
+```{r}
+str_sub(c("Max", "Weber"), 1, 2)
+str_sub(c("Max", "Weber"), -2, -1)
+```
+
+Zastosujmy tę funkcję do analizy imion chłopców i dziewczynek. 
+
+```{r}
+babynames_2017 <- filter(babynames, year == 2017)
+boy_names <- filter(babynames_2017, sex == "M")$name
+girl_names <- filter(babynames_2017, sex == "F")$name
+
+# Wyciągamy pierwsze litery imion chłopców i za pomocą funkcji table() tworzymy proste zestawienie
+boy_first_letter <- str_sub(boy_names, 1, 1)
+table(boy_first_letter)
+  
+# Pora na dziewczynki
+girl_first_letter <- str_sub(girl_names, 1, 1)
+table(girl_first_letter)
+```
+
+I w przypadku chłopców, i w przypadku dziewczynek imiona najczęściej zaczynają się na literę "A". Gdybyśmy chcieli sprawdzić ostatnie litery imion, wystarczyłoby zastosować indeks `-1`.
+
+
+### Funkcja `str_detect()`
+
+Funkcja ta służy do wyszukiwania wzorców tekstowych. Zwraca informację o tym, które elementy wektora zawierają określony wzorzec (*pattern*) (`TRUE`) oraz które go nie zawierają (`FALSE`). Na razie wyszukiwać będziemy *ustalone* wzorce, stąd argument `pattern` ustawiamy na `fixed`. Później dowiemy się, w jaki sposób tworzyć bardziej ogólne wzorce przy użyciu wyrażeń regularnych.
+
+```{r}
+maxs <- c("Max Weber",
+          "Max Horkheimer",
+          "Emile Durkheim",
+          "Maximillian II")
+
+# Wyszukajmy wzorzec "Max".
+str_detect(maxs,
+           pattern = fixed("Max"))
+
+```
+
+Jak możemy wykorzystać `str_detect()` do analizy imion?
+
+```{r}
+# Sprawdźmy, w których imionach męskich pojawia się przyrostek "ette".
+contains_ette <- str_detect(boy_names, pattern = fixed("ette"))
+
+# Otrzymaliśmy wektor wartości logicznych o tej samej długości, co boy_names.
+str(contains_ette)
+
+# Ile imion męskich zawiera przyrostek "ette"?
+sum(contains_ette)
+
+# Które to imiona?
+boy_names[contains_ette]
+```
+
+
+### Funkcja `str_subset()`
+
+Operacja, którą wykonaliśmy przed chwilą, jest na tyle częsta w pracy z informacjami tekstowymi, że w pakiecie `stringr` mamy osobną funkcję, która pozwala na przeprowadzenie jej w jednym kroku. Funkcja `str_subset` zwraca podwektor składający się jedynie z napisów, w których znalezione zostało dopasowanie wzorca. 
+
+```{r}
+str_subset(maxs,
+           pattern = fixed("Max"))
+```
+
+Wróćmy do zbioru danych `babynames`.
+
+```{r}
+# Które imiona męskie zawierają przyrostek "ette"?
+str_subset(boy_names, pattern = fixed("ette"))
+
+# Które imiona żeńskie zaczynają się na litere "U"?
+starts_U <- str_subset(girl_names, pattern = fixed("U"))
+starts_U
+
+# Które imiona żeńskie zawierają "U" i "z"? 
+str_subset(starts_U, pattern = fixed("z"))
+```
+
+Jak widać, łączenie wielu wywołań funkcji `str_subset()` pozwala nam uzyskać bardziej skomplikowane wzorce.
+
+
+### Funkcja `str_count()`
+
+Funkcja ta zlicza, ile razy da się dopasować w każdym napisie podanym jako pierwszy argument wzorzec określony przy użyciu drugiego argumentu. 
+
+```{r}
+str_count(maxs,
+           pattern = fixed("e"))
+
+# Otrzymaliśmy wektor liczbowy o tej samej długości, co "maxs".
+```
+
+Zastosujmy ją do imion dzieci.
+
+```{r}
+# Ile razy w imionach żeńskich występuje litera "a"?
+number_as <- str_count(girl_names, pattern = fixed("a"))
+
+# A litera "A"?
+number_As <- str_count(girl_names, pattern = fixed("A"))
+
+# Stwórzmy histogramy, żeby zorientować się w sytuacji.
+hist(number_as)
+hist(number_As)  
+
+# Obliczmy, ile jest wystąpień "a" i "A" łącznie.
+total_as <- number_as + number_As
+
+# Jakie imiona zawierają więcej niż 4 "a"/"A"?
+girl_names[total_as > 4]
+```
+
+
+### Funkcja `str_split()`
+
+Funkcja ta służy do podziału napisów na *podnapisy*. Granice podziału są określane przez podany wzorzec.
+
+Zobaczmy, jak `str_split` sprawdza się w przypadku dat. 
+
+```{r}
+date_ranges <- c("13.01.2020 - 29.01.2020", "30.01.2020 - 06.02.2020")
+
+# Dzielimy daty na podstawie " - ".
+split_dates <- str_split(date_ranges, pattern = fixed(" - "))
+split_dates
+# Otrzymaliśmy listę.
+
+# Zróbmy to samo, ale tym razem ustawmy argument "simplify" na TRUE i "n" (liczba części) na 2.
+split_dates_n <- str_split(date_ranges, pattern = fixed(" - "), simplify = TRUE, n = 2)
+split_dates_n
+```
+
+Otrzymaliśmy macierz. Jej wiersze odpowiadają elementom listy.
+
+Dzielimy dalej.
+
+```{r}
+# Wyciągamy daty początkowe. 
+start_dates <- split_dates_n[, 1]
+
+# Dzielimy je na dzień, miesiąc i rok. 
+str_split(start_dates, pattern = fixed("."), n = 3, simplify = T)
+```
+
+Wyciągnijmy teraz imiona i nazwiska.
+
+```{r}
+both_names <- c("Kowalski, Jan", "Nowak, Anna")
+both_names_split <- str_split(both_names, pattern = fixed(", "), simplify = T)
+both_names_split
+first_names <- both_names_split[, 2]
+last_names <- both_names_split[, 1]
+```
+
+A gdybyśmy chcieli podzielić zdania na słowa? Skorzystajmy ze zbioru `sentences`, który znajduje się w `stringr` i zawiera "Harvard sentences" - zdania używane do testowania głosu.
+
+```{r}
+# Wybierzmy 6 pierwszych zdań i podzielmy je na słowa na podstawie " " (spacji).  
+sentences %>%
+  head %>% 
+  str_split(" ")
+
+sentences %>%
+  head %>% 
+  str_split(" ", simplify = TRUE)
+```
+
+Uwaga 1: jak widać, nie jest to najlepsza metoda podziału tekstu na słowa. "It's" to w istocie dwa słowa. Na kolejnych zajęciach poznamy inne, mniej naiwne metody. 
+
+Uwaga 2: dzięki zastosowaniu argumentu `simplify = TRUE` otrzymamy wynik, który jest generalnie łatwiejszy do pracy, ale R zawsze zwróci nam n elementów (nawet jeśli niektóre są puste, ""). 
+
+
+### Funkcje `str_replace()` i `str_replace_all()`
+
+Funkcja `str_replace()` pozwala na zastąpienie pewnego wzorca określonym napisem (definiujemy go przy użyciu argumentu `replacement`). Jest bardzo często wykorzystywana do czyszczenia danych - umożliwia szybkie usunięcie niechcianych fragmentów poprzez zastąpienie ich `""` (pustym napisem). 
+
+```{r}
+# Załóżmy, że mamy wektor złożony z numerów identyfikacyjnych uczniów liceum. 
+ids <- c("ID#: 192", "ID#: 118", "ID#: 001")
+
+# Zostawmy same numery.
+id_nums <- str_replace_all(ids, pattern = "ID#: ", replacement = "")
+id_nums
+
+# A następnie przekształćmy na wektor liczbowy.
+id_nums <- as.numeric(id_nums)
+str(id_nums)
+```
+
+Spójrzmy na inny przykład. Tym razem będą to numery telefonów. 
+
+```{r}
+phone_nums <- c("500-555-0129", "501-555-0187", "521-555-0213")
+
+# Zamieńmy "-" na " ".
+str_replace(phone_nums, pattern = "-", replacement = "")
+```
+
+Nie o to nam chodziło. Jeśli chcemy usunąć wszystkie "-", musimy skorzystać z funkcji `str_replace_all()`.
+
+```{r}
+str_replace_all(phone_nums, pattern = "-", replacement = "")
+
+# Zapiszmy numery w formacie xxx.xxx.xxxx
+str_replace_all(phone_nums, pattern = "-", replacement = ".")
+```
+
+Za pomocą `str_replace_all()` możemy zastąpić wiele napisów poprzez zdefiniowanie wektora.
+
+```{r}
+domy <- c("1 dom", "2 domy", "3 domy", "2 domy")
+str_replace_all(domy, c("1" = "jeden", "2" = "dwa", "3" = "trzy"))
+```
+
+
+## Podsumowanie
+
+Zobaczmy, jak możemy połączyć poznane przed chwilą funkcje, żeby wykonać nieco bardziej złożone operacje.  
+
+Przykład pierwszy: "anonimizacja" 
+
+```{r}
+names <- c("Max Weber", "Emile Durkheim")
+
+# Dzielimy na imiona i nazwiska. 
+names_split <- str_split(names, pattern = fixed(" "), n = 2, simplify = T)
+names_split
+
+# Wyciągamy pierwszą literę nazwiska. 
+abb_last <- str_sub(names_split[, 2], 1, 1)
+abb_last
+
+# Łączymy imię z inicjałem nazwiska. 
+str_c(names_split[, 1], " ", abb_last, ".")
+```
+
+Przykład drugi: porównanie końcowek imion męskich i żeńskich.
+
+```{r}
+# Wybieramy imiona męskie i żeńskie z 2017 roku. 
+babynames_2017 <- filter(babynames, year == 2017)
+
+# Wybieramy dwie ostatnie literary imion.
+last_two <- str_sub(babynames_2017$name, -2, -1)
+
+# Wybieramy te, które kończą się na "ie".
+ends_in_ny <- str_detect(last_two, pattern = fixed("ny"))
+
+# Stwórzmy tabelę z podziałem na płeć.  
+table(babynames_2017$sex[ends_in_ny])
+```
+
+
+# Wyrażenia regularne na dwa sposoby
+
+Jak już Państwo wiecie, wyrażenia regularne (regex lub regexp) są niezwykle przydatne do wydobywania informacji z tekstu poprzez wyszukiwanie jednego lub więcej dopasowań określonego wzorca (a konkretnie: sekwencji znaków ASCII lub unicode). Pozwalają one na zdefiniowane nawet bardzo ogólnych wzorców w sposób maksymalnie zwięzły i ułatwiają wyszukiwanie złożonych fraz. Możemy je zastosować w każdej funkcji `stringr`, która zawiera argument `pattern`.
+
+Słownik regex:
+
+  - `^` - rozpoczyna się od
+  - `$` - kończy się na
+  - `d` - dowolna cyfra
+  - `w` - dowolna cyfra lub litera lub znak podkreślenia
+  - `s` - tzw. znaki niedrukowane (*white spaces*), czyli spacja, tabulacja, koniec linii
+  - `()` - grupowanie
+  - `|` - alternatywa (lub)
+  - `[]` - wymienia dozwolone znaki
+  - `[^]` - wymienia niedozwolone znaki
+  - `*` - poprzedni znak zostanie powtórzony zero lub więcej razy
+  - `+` - poprzedni znak zostanie powtórzony jeden lub więcej razy
+  - `?` - poprzedni znak zostanie powtórzony zero lub jeden raz
+  - `{n}` - poprzedni znak zostanie powtórzony n razy
+  - `.` - dowolny znak oprócz nowej linii (\n)
+  - `\` - pozwala na użycie znaków specjalnych
+
+Niestety praca z wyrażeniami regularnymi, szczególnie na początku, może nie być prosta. Ich składnia bywa trudna do odczytania, przez co nasz kod staje się podatny na błędy - ich wychwycenie może sprawiać problemy. W R mamy jednak do dyspozycji pakiet [`rebus`](https://www.rdocumentation.org/packages/rebus), który zawiera funkcje ułatwiające budowanie wyrażeń regularnych. 
+
+```{r}
+if (!("rebus" %in% installed.packages()[, 1])) {
+  install.packages("rebus")
+}
+library(rebus)
+```
+
+Do tworzenia wzorców za pomocą pakietu `rebus` korzystać będziemy z operatora `%R%`. Służy on do łączenia kolejnych fragmentów wyrażeń regularnych. Można go rozumieć jako "następnie".  
+
+```{r}
+# Przykład zastosowania regex
+str_detect(c("R2-D2", "C-3PO"), pattern = "^.\\d+")
+
+# A teraz stwórzmy ten sam wzór, korzystając z pakietu "rebus".
+pattern1 <- START %R%
+  ANY_CHAR %R%
+  one_or_more(DGT)
+
+str_detect(c("R2-D2", "C-3PO"), pattern = pattern1)
+```
+
+Jak widzimy, korzystanie z wyrażeń regularnych w ramach `rebus` wymaga nieco więcej *pisania*, ale za to poszczególne elementy są bardziej czytelne i łatwiejsze do zrozumienia, nawet dla laika. Nie musimy się też przejmować ukośnikami.
+
+
+## Coś się kończy...
+
+Do testowania wzorców szczególnie użyteczne są funkcje `str_view()` i `str_view_all()`, które wyświetlają nam podgląd - dopasowania (w przypadku `str_view()` pierwsze, a w przypadku `str_view_all() - wszystkie) są podświetlone.
+
+```{r}
+# Wyszukajmy napisy, które zaczynają się od "M". 
+str_view(maxs, pattern = START %R% "M")
+# Czyli: początek napisu, a następnie "M". 
+
+# A teraz napisy, które kończą się na "er".
+str_view(maxs, pattern = "er" %R% END)
+# Czyli: "er", a następnie koniec napisu. 
+
+# Te sam efekt moglibyśmy osiągnąć za pomocą znaków "^" (= START) i "$" (= END).
+str_view(maxs, pattern = "^M")
+str_view(maxs, pattern = "er$")
+```
+
+Funkcje `str_view` i `str_view_all` przyjmują dodatkowy argument: `match`. Jest on domyślnie ustawiony na `FALSE`. Jeśli zmienimy ustawienie, R wyświetli nam tylko te elementy, które pasują do wzorca. Jest to bardzo przydatne w przypadku większych zbiorów danych tekstowych. 
+
+```{r}
+str_view(maxs, pattern = "er$", match = TRUE)
+```
+
+Jeśli chcemy wyszukać napisy, które dokładnie odpowiadają wzorcowi, należy użyć do tworzenia wzorca i `START` i `END`. 
+
+```{r}
+str_view(x, pattern = START %R%
+"Max Weber" %R%
+END)
+```
+
+Ale jest też inna opcja: funkcja `exactly()`.
+
+```{r}
+str_view(maxs, pattern = exactly("Max Weber"))
+```
+
+
+## Dzika karta
+
+`ANY_CHAR` - a w języku wyrażeń regularnych `.` - dopasowuje jeden *dowolny* znak. A właściwie prawie dowolny, bo jest jeden wyjątek: znak nowego wiersza. 
+
+```{r}
+x <- c("mrok", "smok", "oko", "riksza", "War kot.")
+str_view(x, pattern = "r" %R% 
+           ANY_CHAR %R% 
+           "k")
+```
+
+Warto zwrócić uwagę, że owym dowolnym znakiem może być także " " (spacja).  
+
+Inne przykłady użycia:
+
+```{r}
+# Wyszukajmy dwa dowolne znaki.
+str_view(x, pattern = ANY_CHAR
+         %R% ANY_CHAR)
+# Okazuje się, że wyrażenia regularne są "leniwe" - uzyskujemy tylko pierwsze dopasowanie.
+
+# Wyszukajmy napisy składające się dokładnie z 3 znaków.
+str_view(x, pattern = exactly(ANY_CHAR %R%
+                                ANY_CHAR %R%
+                                ANY_CHAR))
+
+# W regex wyglądałoby to w ten sposób:
+str_view(x, pattern =  "^...$")
+```
+
+A gdybyśmy chcieli znaleźć napisy, które kończą się kropką?
+
+```{r}
+str_view(x, pattern = DOT %R% 
+           END)
+```
+
+Jak to wygląda poza pakietem `rebus`?
+
+```{r}
+str_view(x, pattern = "\\.$")
+```
+
+Musimy wprowadzić dwa odwrócone ukośniki. Dotyczy to też innych znaków, np. `$` czy `^`. Tymczasem w pakiecie `rebus` `$` to po prostu `DOLLAR`, a `^` - `CARAT`. Ukośniki są zbędne. 
+
+
+## Alternatywy
+
+Funkcja `or()` pozwala nam zdefiniować alternatywy, a więc dopasować pewne podwyrażenie *lub* jakieś inne podwyrażenie. Jest ona odpowiednikiem operatora `|`. 
+
+```{r}
+y <- c("lud", "lód")
+str_view(y, pattern = or("lud", "lód"))
+
+# Ale skoro te dwa słowa różnią się tylko jedną literą...
+str_view(y, pattern = "l" %R% or("u", "ó") %R% "d")
+```
+
+Warto pamiętać, że dopasowanie alternatywy przebiega zawsze od lewej do prawej. Jeśli pewne wyrażenie zostanie dopasowane, inne warianty nie będą już rozpatrywane i nastąpi kontynuacja wyszukiwania wzorca w dalszych partiach tekstu. 
+
+```{r}
+y <- c("lud", "ludny lud", "lód")
+str_view(y, pattern = "lud|lód")
+```
+
+Przećwiczmy to na imionach.
+
+```{r}
+# Stwórzmy wzorzec dla imion Jeffrey i Geoffrey oraz ich wariantów.
+JG_pattern <-
+  or("Je", "Geo") %R% 
+  "ff" %R% 
+  or("ry", "ery", "rey", "erey")
+
+# Wyszukajmy wśród imiom męskich.
+str_view(boy_names, pattern = JG_pattern, match = TRUE)
+```
+
+Ten sam rezultat możemy też osiągnąć, korzystając z funkcji `char_class()`, która jest odpowiednikiem `[]`. Służy ona do definiowania znaków, które mogą zostać uwzględnione w dopasowaniu ("jeden spośród"). Można o niej myśleć jako o mniej "zachłannej" wersji `ANY_CHAR`, bo ograniczamy wybór do ściśle określonego zbioru znaków. 
+
+```{r}
+str_view(y, pattern = "l" %R% char_class("uó") %R% "d")
+str_view(y, pattern = "l[uó]d")
+```
+
+Wróćmy do imion.
+
+```{r}
+# Wybieramy samogłoski, uwzględniając wielkość liter. 
+vow <- char_class("Aa", "Ee", "Ii", "Oo", "Uu")
+# Alternatywnie
+char_class("aeiouAEIOU")
+
+# Sprawdzamy, ile samogłosek występuje w imionach męskich (średnia liczba i % liter, z których składa się imię). 
+num_vow <- str_count(boy_names, pattern = vow)
+name_len <- str_length(boy_names)
+mean(num_vow)
+mean(num_vow / name_len)
+```
+
+Czasami łatwiej jest wykluczyć pewne znaki, niż określać wszystkie, które mają wystąpić w dopasowaniu. Pomocna będzie w tym przypadku funkcja `negated_char_class()` lub operator dopełnienia `^` stosowany bezpośrednio po otwierającym nawiasie kwadratowym. Pozwalają one na zdefiniowanie zbiorów znaków, które nie będą uwzględnione w dopasowaniu.
+
+```{r}
+# Tylko samogłoski
+negated_char_class("Aa", "Ee", "Ii", "Oo", "Uu")
+
+# Wszystkie znaki, które nie są spacjami.
+negated_char_class(" ")
+```
+
+Możemy też zdefiniować zakres interesujących nas znaków.
+
+```{r}
+# Dowolna mała litera
+char_class("a-z")
+
+# Dowolna duża litera
+char_class("A-Z")
+```
+
+
+## Powtórzenia
+
+Do wychwytywania powtarzających się znaków służą funkcje `one_or_more()`, `zero_or_more()`, `optional()` i `repeated()`. W `regex` odpowiadają im kwantyfikatory `+`, `*`, `?` i `{n}`. 
+
+Poszukajmy samogłosek.
+
+```{r}
+l <- c("laa", "aaalalaa", "allaa", "lly")
+
+# 1 lub więcej powtórzeń
+str_view(l, pattern = one_or_more(vow))
+
+# 0 lub więcej powtórzeń
+str_view(l, pattern = zero_or_more(vow))
+
+# 0 lub jedno powtórzenie
+str_view(l, pattern = optional(vow))
+
+# Określona liczba powtórzeń
+str_view(l, pattern = repeated(vow, 3))
+```
+
+
+Poszukajmy imion żeńskich, które składają się wyłącznie z samogłosek.
+
+```{r}
+str_view(girl_names, 
+  pattern = START %R% one_or_more(vow) %R% END, 
+  match = TRUE)
+
+# Alternatywnie
+str_view(girl_names, 
+  pattern = exactly(one_or_more(vow)), 
+  match = TRUE)
+```
+
+
+## Predefiniowane zbiory znaków
+
+Do tworzenia wzorca możemy wykorzystać predefiniowane zbiory znaków. Jeśli interesują nas cyfry (*digits*), należy sięgnąć po `DGT` lub `\d`, jeśli cyfry, litery lub znaki podkreślenia (*word characters*) - `WRD` lub `\w`, jeśli natomiast spacje (*white spaces*) - `SPC` lub `\s`. 
+
+Poszukajmy numerów telefonów. 
+
+```{r}
+phone_nums <- c("500-555-0129", "501 555 0187", "521,555,0213", "(534)123 4621")
+
+# Tworzymy wzorzec składający się z trzech cyfr. 
+three_digits <- DGT %R% DGT %R% DGT
+str_view_all(phone_nums, pattern = three_digits)
+
+# A teraz z czterech
+four_digits <- three_digits %R% DGT
+
+# Uwzględnijmy różne separatory.
+separator <- char_class("-,() ")
+str_view_all(phone_nums, pattern = separator)
+
+# Stwórzmy jeden wzorzec, korzystając z OPEN_PAREN, czyli wprowadzając nawias (tutaj: opcjonalny).  
+phone_pattern <- optional(OPEN_PAREN) %R%
+  three_digits %R%
+  zero_or_more(separator) %R%
+  three_digits %R% 
+  zero_or_more(separator) %R%
+  four_digits
+
+str_view_all(phone_nums, pattern = phone_pattern)
+```
+
+A teraz *wydobądźmy* te numery. Potrzebne nam będą funkcje `str_extract()` oraz `str_extract_all()`, które zwracają podnapisy pasujące do danego wzorca. Porównajmy ich działanie.  
+
+```{r}
+str_extract(phone_nums, phone_pattern)
+str_extract_all(phone_nums, phone_pattern)
+```
+
+W pierwszym przypadku otrzymujemy wektor, a w drugim - listę.
+
+
+## Wydzielone podwyrażenia i odwołania 
+
+Spójrzmy na następujący przykład:
+
+```{r}
+soc_contacts <- c("weber@max.com", "emiledurkheim@edu.fr",
+                  "marx@marx.com")
+
+email <- one_or_more(WRD) %R%
+  "@" %R% one_or_more(WRD) %R%
+  DOT %R% one_or_more(WRD)
+
+str_view(soc_contacts, pattern = email)  
+```
+
+Stworzyliśmy wzorzec, który pozwala nam wyszukać adresy e-mail socjologów. A co jeśli interesują nas nie całe adresy, ale ich poszczególne fragmenty, np. nazwa użytkownika czy domena? 
+
+Do wydobycia tych informacji potrzebne nam będą dwie funkcje: `capture()` z pakietu `rebus` (w regex: nawiasy okrągłe `()`), która pozwala na *uchwycenie* wybranych fragmentów wzorca, a więc stworzenie podwyrażeń, oraz `str_match()` ze `stringr`, która pozwala uchwycone fragmenty *wyciągnąć*. Działanie `str_match()` może wydawać się podobne do działania `str_extract()` - i tak, i nie. Obie funkcje służą do ekstrakcji wyrażeń, ale `str_match()` umożliwia ekstrakcję wyrażeń w podgrupach. 
+
+```{r}
+email <- capture(one_or_more(WRD)) %R%
+  "@" %R% capture(one_or_more(WRD)) %R%
+  DOT %R% capture(one_or_more(WRD))
+
+email_parts <- str_match(soc_contacts, pattern = email)
+email_parts
+```
+
+Uzyskaliśmy macierz. Jej pierwsza kolumna odpowiada całemu dopasowanemu napisowi, a kolejne to dopasowania do poszczególnych podgrup, które zdefiniowaliśmy za pomocą funkcji `capture()`.
+
+Wyciągnijmy tylko nazwy użytkownika. 
+
+```{r}
+IDs <- email_parts[ , 2]
+IDs
+```
+
+Podwyrażenia, które uchwyciliśmy dzięki `capture()`, możemy wykorzystać do budowania wzorca. Zobaczmy na przykładzie:
+
+```{r}
+str_view(c("lekka", "lotto", "jesienny"),
+         pattern = capture(LOWER) %R% REF1)
+```
+
+Najpierw zdefiniowaliśmy grupę (`LOWER` - małe litery), a następnie odwołaliśmy się do niej za pomocą `REF1`. W efekcie znaleźliśmy powtarzające się znaki.
+
+Uwaga: jeśli uchwycimy więcej grup, możemy się do nich odwoływać jako do `REF2`, `REF3` itd. (aż do `REF9`).
+
+Sprawdźmy, jak możemy wykorzystać wydzielone podwyrażenia do analizy imion.
+
+```{r}
+# Zmieńmy duże litery na małe. Służy do tego funkcja tolower().
+boy_names_l <- tolower(boy_names)
+
+repeated_three_times <- capture(LOWER) %R% REF1 %R% REF1
+
+# Jakie to imiona? Dodajmy do funkcji str_view() argument match = TRUE, żeby R wyświetlił tylko imiona pasujące do wzorca (imion jest zbyt dużo, żeby wyświetlać je wszystkie).
+str_view(boy_names_l, pattern = repeated_three_times, match = TRUE)
+```
+
+Skomplikujmy nieco sprawę. Wyszukajmy palindromy składające się z 4 liter (imiona brzmiące tak samo czytane od lewej do prawej i od prawej do lewej). 
+
+```{r}
+palindrome <-
+  exactly(capture(LOWER) %R%
+            capture(LOWER) %R%
+            REF2 %R%
+            REF1)
+str_view(boy_names, pattern = palindrome, match = TRUE)
+```
+
+
+# Analiza kontekstu na przykładzie Airbnb
+
+Wczytajmy zbiór danych `bos_reviews`, która zawiera 1000 recenzji bostońskich apartamentów wynajmowanych w Airbnb. Treść recenzji znajduje się w kolumnie `comments`.
+
+```{r}
+reviews <- readRDS("bos_reviews.rds")
+reviews <- reviews$comments
+writeLines(reviews[1:10])
+```
+
+Załóżmy, że chcemy sprawdzić, co goście sądzą na temat lokalizacji apartamentów. Zacznijmy od stworzenia wzorca, który pozwoli nam sprawdzić, w jakim kontekście pojawia się słowo "location". Interesuje nas po 5 słów z prawej i z lewej strony. Tym razem spróbujmy posłużyć się regex.   
+
+```{r}
+pattern_rev <- "(\\w+\\s){5}location\\s?(\\w+\\s){5}"
+
+str_view_all(
+  reviews,
+  pattern = pattern_rev,
+  match = TRUE
+  )
+```
+
+Uwzględnijmy inne słowa dotyczące lokalizacji, np. "neighbourhood", "area" czy "district"? 
+
+```{r}
+pattern_rev_loc <- "(\\w+\\s){5}(location|neighbourhood|area|district)\\s?(\\w+\\s){5}"
+str_view_all(
+  reviews,
+  pattern = pattern_rev_loc,
+  match = TRUE
+  )
+```
+
+Nie jest to jednak idealny sposób. Zobaczmy:
+
+```{r}
+sum(str_count(reviews, "(location|neighbourhood|area|district)"))
+sum(str_count(reviews, pattern_rev_loc))
+```
+
+Wygląda na to, że pominęliśmy większość wzmianek dotyczących lokalizacji. Co nie zagrało? Zapomnieliśmy o wykrzyknikach, kropkach i interpunkcji jako takiej. Do jej uchwycenia we wzorcu możemy skorzystać z `[:punct:]`.
+
+```{r}
+# Tym razem stwórzmy wzorzec w trzech krokach, korzystając z funkcji str_c(). 
+context <- "([\\w[:punct:]]+\\s){0,5}"
+location <- "(location|neighbourhood|area|district)"
+with_context <- str_c(context, location, "\\s?", context)
+
+str_view_all(
+  reviews,
+  pattern = with_context,
+  match = TRUE
+  )
+```
+
+Jaką mamy skuteczność?
+
+```{r}
+sum(str_count(reviews, "(location|neighbourhood|area|district)"))
+sum(str_count(reviews, with_context))
+```
+
+
+
+---
+
+![](https://raw.githubusercontent.com/tzoltak/3502-SCC-ADR/master/belka_gorna.png)
+
+
