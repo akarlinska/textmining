@@ -15,7 +15,7 @@ Metodologia eksploracji tekstu jest opracowywana w różnych dyscyplinach do ró
 
 Uczestnicy i uczestniczki zajęć poznają narzędzia do przetwarzania danych tekstowych z wielu plików zapisanych w różnych formatach oraz zautomatyzowane sposoby wydobywania informacji z tekstów, dowiedzą się, jak przygotować proste statystyki dotyczące badanych dokumentów oraz wyznaczyć podobieństwo i pogrupować teksty, a rezultaty odczytać z wykorzystaniem różnych metod wizualizacji wyników.
 
-Na zajęciach korzystać będziemy z narzędzi do przetwarzania i analizy danych tekstowych Korpusomat, TermoPL (IPI PAN), Inforex, WSD, Topic, WebSty, Sentemo (CLARIN-PL), AntConc, LancsBox, bibliotek Natural Language Toolkit (NLTK) i spaCy, pracujących w środowisku Pythona, oraz bibliotek OpenNLP, tm i stylo pracujących w języku R.
+Na zajęciach korzystać będziemy z narzędzi do przetwarzania i analizy danych tekstowych Korpusomat, TermoPL, Topic, AntConc, #LancsBox, bibliotek Natural Language Toolkit (NLTK) i spaCy, pracujących w środowisku Pythona, oraz bibliotek tidytext, tm, quanteda, stringr i stylo pracujących w języku R.
 
 ---
 Materiały na zajęcia *Eksploracja tekstu (text mining)* zostały przygotowane w ramach projektu *Program zintegrowanych działań na rzecz rozwoju Uniwersytetu Warszawskiego*, realizowanego w ramach programu operacyjnego Wiedza Edukacja Rozwój, oś priorytetowa III. *Szkolnictwo wyższe dla gospodarki i rozwoju*, działanie: 3.5 *Kompleksowe programy szkół wyższych*.
